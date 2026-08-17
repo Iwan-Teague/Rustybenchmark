@@ -1,0 +1,185 @@
+# 02 — Task format
+
+A task is not a file. A task is a **family**: a generator function from a seed to a fresh problem instance, its reference implementation, and its oracle.
+
+## Directory layout
+
+```
+tasks/borrowck/split-mut-window/
+├── task.toml            # manifest                          (public)
+├── gen.rs               # seed -> Instance                  (public)
+├── template/            # skeleton fragments                (public)
+│   ├── Cargo.toml.hbs
+│   └── src/lib.rs.hbs
+└── oracle/                                                  (NEVER shown to the model)
+    ├── synth.rs         # reference synthesis from Spec
+    ├── props.rs         # property derivation from Spec
+    ├── tests.rs         # hidden example tests
+    └── constraints.toml # static / lint gates
+```
+
+Generators are public. Seeds used in a run are public. **A solved instance is never published.**
+
+## Manifest — `task.toml`
+
+```toml
+schema        = 1
+id            = "borrowck/split-mut-window"
+title         = "Sliding-window mutation without cloning"
+category      = "borrow-lifetimes"
+subcategory   = "aliasing"
+difficulty    = 3                 # 1-5, author-declared; recalibrated from live data
+authored      = "2026-08-17"
+rust_min      = "1.85"
+edition       = "2024"
+suite         = "synth"           # synth | wild
+
+[generation]
+kind       = "seeded"             # seeded | mined | frozen
+entry      = "split_mut_window"   # fn in gen.rs
+seed_space = "u64"
+
+# What a seed is actually allowed to change. All four should be true for a
+# memorisation-resistant family; a renamer-only generator is worthless.
+variance = { structural = true, naming = true, numeric = true, api_surface = true }
+
+# Anti-twin floor: minimum normalised tree-edit distance between the reference
+# implementations of any two instances of this family. Enforced in CI.
+min_instance_distance = 0.25
+
+[interaction]
+mode          = "repair"          # single-shot | repair | agentic
+max_attempts  = 2                 # attempt 2 receives compiler + test output only
+context       = "files"           # files | diff | agent-tools
+budget_tokens = 16000             # completion cap; overrun is a scored failure
+wall_timeout_s = 900
+
+[deps]
+offline  = true
+vendored = ["itertools@0.14"]     # pre-vendored; no network at eval time
+
+[oracle]
+layers  = ["apply", "compile", "behavior", "constraint", "quality"]
+weights = { behavior = 0.7, constraint = 0.2, quality = 0.1 }
+# apply and compile carry weight 0.0 — they are gates, not score components.
+```
+
+## Generator contract
+
+```rust
+/// A materialised problem, ready to hand to a model.
+pub struct Instance {
+    /// Rendered task statement shown to the model.
+    pub prompt: String,
+    /// Files placed in the model's workspace.
+    pub files: BTreeMap<PathBuf, String>,
+    /// Oracle files. Injected into a *separate* grading workspace, after the
+    /// model's turn has completed. Never present on disk during generation.
+    pub hidden: BTreeMap<PathBuf, String>,
+    /// Structured parameters the oracle needs (sizes, invariants, expected complexity).
+    pub facts: serde_json::Value,
+    /// Unique low-frequency string embedded in the prompt. If it later appears in
+    /// a public corpus or in another instance's submitted output, this instance leaked.
+    pub canary: String,
+}
+
+pub trait Generator {
+    fn generate(&self, seed: u64) -> Instance;
+
+    /// Self-check. Run in CI across >= 1000 seeds. See "Generator validation".
+    fn validate(&self, seed: u64) -> Result<(), GenError>;
+}
+```
+
+## Solution-first generation
+
+**Do not write a problem and then a solution. Generate the solution from the seed, then derive the problem from it.**
+
+```rust
+fn generate(seed: u64) -> Instance {
+    let spec      = Spec::sample(seed);            // structural params: lifetimes, bounds,
+                                                   // sizes, which std API is the natural route
+    let reference = synthesize_reference(&spec);   // ground truth — correct by construction
+    let props     = derive_properties(&spec);      // invariants read off the Spec, not the code
+    let skeleton  = ablate(&reference, &spec);     // remove exactly what the model must supply
+    let prompt    = render_prompt(&spec, &skeleton);
+
+    Instance {
+        prompt,
+        files:  skeleton,
+        hidden: bundle(reference, props, spec.constraints()),
+        facts:  spec.into(),
+        canary: mint_canary(seed),
+    }
+}
+```
+
+Why this shape:
+
+- **The reference is correct by construction.** It is built from the same `Spec` that generates the properties. There is no hand-written answer that can drift out of sync with the question.
+- **Solvability is guaranteed.** The reference is, by definition, a solution that passes.
+- **Difficulty is a knob.** `Spec::sample` reads difficulty parameters directly.
+- **Seeds can vary structurally** without a human maintaining a matching reference for every shape. This is what lifts the cap on how memorisation-resistant a family can be. See [ADR-0003](adr/0003-per-seed-generated-references.md).
+
+### What `Spec` should carry
+
+At minimum, per family:
+
+```rust
+struct Spec {
+    difficulty:   u8,
+    // structural
+    lifetimes:    u8,          // count and nesting of borrows involved
+    generic_args: u8,
+    trait_bounds: Vec<BoundShape>,
+    nesting:      u8,
+    // numeric
+    sizes:        Vec<usize>,  // array lengths, window widths, thresholds
+    // api surface — which std route is the natural solution this time
+    api_route:    ApiRoute,    // e.g. ChunksExactMut | SplitAtMut | IterMutZip
+    // naming
+    idents:       IdentPool,   // domain-flavoured identifier set drawn from seed
+}
+```
+
+Vary all four axes. A generator that only permutes identifiers is memorisable after a handful of instances and must fail CI via `min_instance_distance`.
+
+## Generator validation (CI, ≥1000 seeds per family)
+
+Every one of these is a hard gate. A family that fails any of them does not ship.
+
+| Check | Why |
+|---|---|
+| Reference passes its own oracle | Self-consistency |
+| Reference passes a **second, independently written** implementation via differential fuzz | Catches a wrong generator — the failure mode that silently corrupts every score |
+| Skeleton **fails** the oracle | Ablation actually removed the answer |
+| `todo!()`, `unimplemented!()`, empty body all fail | No trivial pass |
+| Returning the skeleton unchanged fails | No copy-through pass |
+| Pairwise normalised tree-edit distance ≥ `min_instance_distance` | Instances are not renamed twins |
+| Reference compiles clean under the family's own `constraints.toml` | The constraints are satisfiable |
+| Generation is deterministic: same seed → byte-identical instance | Resume and replay depend on this |
+| Prompt contains exactly one canary, and no oracle content | No leakage into the model's view |
+
+`rustybench validate-family <id> --seeds 1000` runs all of the above.
+
+## Seed derivation
+
+Seeds are never author-chosen for scored runs.
+
+```
+seed(task_id) = blake3(challenge_nonce || epoch || task_id || seed_index)[..8] as u64
+```
+
+- `challenge_nonce` is issued by the server (see [10-integrity.md](10-integrity.md)). It did not exist before the run was requested, so precomputed answers cannot apply.
+- `epoch` rotates (monthly). A fixed per-epoch seed set is used for **all** models in that epoch, which enables paired statistical comparison — see [07-statistics.md](07-statistics.md).
+- Local/offline runs use `challenge_nonce = "local"` and are trust tier T0.
+
+## `kind = "mined"`
+
+For the `wild` suite (categories `multi-file-repo` and `api-evolution`). Instead of synthesising, the generator draws from a pre-built corpus of real fail-to-pass commits, then applies seeded perturbations (identifier renaming, unrelated-hunk injection, dependency version shifts) so that instances are not byte-identical to upstream history.
+
+Mined families cannot guarantee oracle correctness by construction — they inherit it from the upstream repository's own tests. They are therefore reported as a **separate suite**, never blended into the synthetic score. See [ADR-0002](adr/0002-hand-written-and-mined-suites.md).
+
+## `kind = "frozen"`
+
+A fixed instance with no generation. Used only for harness development and smoke tests. **Never eligible for a scored suite** — the harness refuses to include `frozen` families in `standard` or above.
