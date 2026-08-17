@@ -40,6 +40,7 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 Supporting:
 
 - **[docs/REVIEW.md](docs/REVIEW.md)** — adversarial review round 1. Read this alongside the docs it corrects; several published figures were wrong and the category design changed as a result
+- **[docs/REVIEW-2.md](docs/REVIEW-2.md)** — adversarial review round 2, empirical against rustc 1.97. Found a direct contradiction between the statistical and integrity designs, and measured the diagnostic instrumentation to be blind for a third of realistic failures
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — terms used precisely throughout
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with the phase each blocks
 - [docs/adr/](docs/adr/) — architecture decision records, including reversals

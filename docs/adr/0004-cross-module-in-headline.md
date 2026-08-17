@@ -1,10 +1,10 @@
-# ADR-0004 — `multi-file-repo` is in the headline number
+# ADR-0004 — `cross-module` is in the headline number
 
 **Status:** Accepted · 2026-08-17 · **Reverses an earlier position**
 
 ## Context
 
-**Earlier position (rejected):** treat `multi-file-repo` as `deep`-tier, opt-in, outside the headline composite. Rationale was cost — a 3–10 file task with a 30B model at ~20 tok/s takes minutes, and consumer hardware is the target.
+**Earlier position (rejected):** treat `cross-module` as `deep`-tier, opt-in, outside the headline composite. Rationale was cost — a 3–10 file task with a 30B model at ~20 tok/s takes minutes, and consumer hardware is the target.
 
 The rejection reason is validity. Real Rust fix patches average **9.8 files, 9.9 hunks, and 139.9 lines**. Python SWE-bench Verified averages **1.25 files, 2.46 hunks, 14.32 lines**. Rust work is structurally larger than Python work, and a Rust benchmark composed only of single-file puzzles is measuring something meaningfully different from Rust.
 
@@ -18,13 +18,13 @@ Further: Rust-SWE-bench attributes **43.7% of agent failures to repo-wide struct
 
 ## Decision
 
-**Option 3.** `multi-file-repo` carries equal category weight in `capability_score`.
+**Option 3.** `cross-module` carries equal category weight in `capability_score`.
 
 Cost is managed by:
 
 - **Fewer families (15 vs 20–25), equal category weight.** Depth traded, not the category.
-- **Bounded repos**: 3–10 files, ≤2k LoC, pre-vendored dependencies, prebuilt dependency workspace. Mining targets small fail-to-pass commits specifically.
-- **A second published figure**: `capability_score_lite` covers categories 1–9. A slow machine can run lite and still appear on the leaderboard.
+- **Bounded scope**: 3–10 files, ≤5k LoC, pre-vendored dependencies, prebuilt dependency workspace. Mining targets small fail-to-pass commits in **workspace member crates**, not whole repositories.
+- **A second published figure**: `capability_score_lite` excludes this category. A slow machine can run lite and still appear on the leaderboard.
 - **Time-boxed, not turn-boxed**: wall-clock cap per task, with timeout recorded separately from genuine failure. On this benchmark that distinction is a *hardware* fact, and surfacing it is the point of the project.
 
 ## Consequences

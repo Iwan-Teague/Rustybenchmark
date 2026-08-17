@@ -94,7 +94,7 @@ Needs a spike before the category is authored. Until resolved, `async-concurrenc
 
 ---
 
-## Q12 — Context limits for `multi-file-repo`
+## Q12 — Context limits for `cross-module`
 
 **Blocks:** Phase 7. Raised by [REVIEW.md](REVIEW.md) S13.
 
@@ -109,3 +109,31 @@ Options: declare a minimum context per suite and refuse below it; provide a retr
 **Blocks:** Phase 6.
 
 Monthly is the working assumption. Shorter epochs mean fresher seeds but fewer models per epoch, which weakens paired comparison. Longer epochs mean better pairing but more precomputation exposure. Needs a decision informed by actual submission volume, so: start monthly, revisit with data.
+
+---
+
+## Q13 — Probe-subset detector power
+
+**Blocks:** Phase 6. Raised by [REVIEW-2.md](REVIEW-2.md) R2-S1 / [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md).
+
+The fresh-probe subset (~15% of units) detects precomputation by comparing probe score to core score. But 15% of a `deep` run is ~163 units, clustered by family — so its effective N is well under 100, and the same design-effect arithmetic that governs scoring applies to the detector.
+
+Unvalidated: can a gap of the size a cheater would produce be distinguished from ordinary sampling noise at useful confidence? The 15% figure is provisional and should be derived from a power calculation on the detector, not chosen for looking reasonable.
+
+---
+
+## Q14 — Are `de_idiomatize` transforms invertible in practice?
+
+**Blocks:** authoring `idiom-refactor` (Phase 5). Raised by [REVIEW-2.md](REVIEW-2.md) R2-S6.
+
+Each clippy lint has a conceptual inverse, but applying several mechanically may produce code that reads as obviously machine-mangled rather than as plausible human-written non-idiomatic Rust. A prompt that looks generated is a prompt models will treat differently — and possibly one they pattern-match to "this is a benchmark" rather than reasoning about.
+
+Needs a Phase 3 spike alongside the exemplar family: generate 20 instances, have a Rust developer judge whether they read as plausible real code.
+
+---
+
+## Q15 — Server-side replay cost under the corrected timing model
+
+**Blocks:** Phase 6. Supersedes part of Q6.
+
+Q6 was written before the round-1 timing correction. A `deep` run is 1088 scored units, and T1 replay re-runs L0–L3 for every one. At corrected build-and-grade costs this is materially more server CPU than Q6 assumed. Re-derive before committing to "verify everything asynchronously".

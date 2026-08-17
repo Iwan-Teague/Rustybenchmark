@@ -56,8 +56,8 @@ A full VM is the wrong tool for consumer hardware — heavy, slow to start, and 
 
 | Control | Linux | macOS | Windows |
 |---|---|---|---|
-| Network deny | network namespace, no veth | `sandbox-exec` seatbelt profile | WFP rule / job object |
-| Filesystem scope | mount namespace, bind-mount workspace only | seatbelt path allowlist | job object + ACL'd scratch |
+| Network deny | network namespace, no veth | `sandbox-exec` seatbelt profile | **AppContainer** without network capabilities |
+| Filesystem scope | mount namespace, bind-mount workspace only | seatbelt path allowlist | AppContainer SID + explicit workspace ACLs |
 | Memory cap | `RLIMIT_AS` + cgroup v2 | `RLIMIT_AS` | job object memory limit |
 | CPU time cap | `RLIMIT_CPU` | `RLIMIT_CPU` | job object |
 | Wall-clock cap | harness supervisor | harness supervisor | harness supervisor |

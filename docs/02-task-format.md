@@ -95,7 +95,44 @@ pub trait Generator {
 }
 ```
 
-## Solution-first generation
+## Two generator archetypes
+
+Solution-first is the principle. It has **two shapes**, and a family declares which one it uses.
+
+| Archetype | `Spec` varies | Pipeline | Categories |
+|---|---|---|---|
+| **Parametric** | a structured space — lifetime count, bound shape, nesting depth, sizes, API route | synthesise reference → **ablate** → prompt | `borrow-lifetimes`, `traits-generics`, `unsafe-core` |
+| **Compositional** | selection from an authored catalogue of invertible transforms | synthesise reference → **inverse-transform** → prompt | `idiom-refactor`, `error-handling` (hybrid) |
+
+The distinction is not cosmetic. Ablation removes the answer and asks for it back — but in
+`idiom-refactor` the model is *given* working code and asked to improve it, so there is nothing to
+remove. The pipeline inverts:
+
+```rust
+let spec       = Spec::sample(seed);                    // anti-patterns, types, domain, nesting
+let reference  = synthesize_idiomatic(&spec);           // the GOOD version
+let prompt_src = de_idiomatize(&reference, &spec);      // apply inverse transforms
+```
+
+`de_idiomatize` is mechanical: each clippy lint has an invertible form. `iter().map().collect()`
+→ index loop; `?` → match with early return; `unwrap_or_default()` → explicit match. **The
+anti-pattern catalogue is a set of invertible `syn` transforms**, and the seed selects which subset
+to apply and where. Combinatorics are adequate — 15 catalogue entries choose 3 gives 455
+combinations before type, domain, and placement variation.
+
+### Threat models differ by archetype
+
+Compositional catalogues are finite and enumerable. A model that memorises 15 anti-pattern → idiom
+mappings solves every instance — **and that is fine, because knowing the idiom catalogue *is* being
+good at idiomatic Rust.**
+
+Contamination resistance is not uniformly valuable across categories. For `borrow-lifetimes`,
+memorising instances is cheating. For `idiom-refactor`, the generator's job is to test **application
+in novel composition and context**, not recall. `min_instance_distance` still applies — instances
+must differ in composition and setting — but over-engineering recall defences for a compositional
+category would be defending the wrong thing.
+
+## Solution-first generation (parametric)
 
 **Do not write a problem and then a solution. Generate the solution from the seed, then derive the problem from it.**
 
@@ -181,7 +218,7 @@ seed(task_id) = blake3(challenge_nonce || epoch || task_id || seed_index)[..8] a
 
 ## `kind = "mined"`
 
-For the `wild` suite (categories `multi-file-repo` and `api-evolution`). Instead of synthesising, the generator draws from a pre-built corpus of real fail-to-pass commits, then applies seeded perturbations (identifier renaming, unrelated-hunk injection, dependency version shifts) so that instances are not byte-identical to upstream history.
+For the `wild` suite (categories `cross-module` and `api-evolution`). Instead of synthesising, the generator draws from a pre-built corpus of real fail-to-pass commits, then applies seeded perturbations (identifier renaming, unrelated-hunk injection, dependency version shifts) so that instances are not byte-identical to upstream history.
 
 Mined families cannot guarantee oracle correctness by construction — they inherit it from the upstream repository's own tests. They are therefore reported as a **separate suite**, never blended into the synthetic score. See [ADR-0002](adr/0002-hand-written-and-mined-suites.md).
 

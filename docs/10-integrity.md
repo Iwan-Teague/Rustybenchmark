@@ -39,13 +39,24 @@ Client uploads the model's raw output artifacts alongside the scores. The server
 
 ### T2 — Challenged
 
-Client requests a run; the server returns `{challenge_nonce, epoch, expires_at}`. Seeds derive as:
+Every epoch issues **two disjoint seed sets**, because a single derivation cannot serve both pairing and freshness — see [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md).
 
 ```
-seed(task_id, i) = blake3(challenge_nonce || epoch || task_id || i)[..8]
+paired core  (~85%, scored)      seed = blake3(epoch_seed  || task_id || i)[..8]
+fresh probe  (~15%, never scored) seed = blake3(batch_nonce || task_id || i)[..8]
 ```
 
-Since the nonce did not exist before the request, precomputed or binary-embedded solutions cannot apply. Combined with T1 replay this is strong: it proves both that *the answers are right* and that *they were not prepared in advance*.
+The **core** is identical for every submitter in the epoch, which is what makes McNemar pairing — and therefore the affordable suite sizes in [07-statistics.md](07-statistics.md) — possible at all.
+
+The **probe** uses a per-batch nonce that did not exist before the request, so precomputed or binary-embedded solutions cannot apply to it. It is a **detector**, not a score:
+
+```
+precompute_signal = core_score − probe_score
+```
+
+Under honest execution the two agree within sampling error, because both draw from the same families and seed space. A submission whose probe score falls materially below its core score did not earn the core score honestly. A cheater must now solve the probe legitimately *and* match their own inflated core score — self-defeating.
+
+Combined with T1 replay this gives: *the answers are right* (replay), and *they were not prepared in advance* (probe gap).
 
 **T2 + T1 is the default requirement for a ranked leaderboard row.**
 

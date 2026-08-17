@@ -36,7 +36,7 @@ The radar chart is the product's most distinctive feature. At 20 families it wou
 **Option 4.**
 
 - **Core — 40 families, rankable.** `borrow-lifetimes`, `traits-generics`, `error-handling`, `idiom-refactor`, `unsafe-core`. Ceiling ±8.5% at ICC 0.3; ±10.7% at the `deep` suite's 4 seeds.
-- **Probe — 12 families, directional only, never ranked.** `async-concurrency`, `perf-optimization`, `api-evolution`, `test-authoring`, `multi-file-repo`, `ffi-boundary`. ±19.6% at `deep`.
+- **Probe — 12 families, directional only, never ranked.** `async-concurrency`, `perf-optimization`, `api-evolution`, `test-authoring`, `cross-module`, `ffi-boundary`. ±19.6% at `deep`.
 
 Corpus: 272 families, up from 200.
 
@@ -51,7 +51,7 @@ Selection was by **oracle tractability**, not by importance:
 | `async-concurrency` | Differential oracle not well-defined under nondeterministic scheduling — see [REVIEW.md](../REVIEW.md) S10, still open |
 | `perf-optimization` | Hardware-gated; unmeasurable on thermally unstable or `CpuOnly` machines |
 | `test-authoring` | L4-dominant, therefore not replay-verifiable |
-| `multi-file-repo` | Mined; small-commit yield unproven; slowest tier |
+| `cross-module` | Mined; small-commit yield unproven; slowest tier |
 | `api-evolution` | Mined; supply bounded by the Rust release calendar |
 | `ffi-boundary` | Miri cannot execute foreign calls, so it needs a different oracle entirely (a real C shim) |
 

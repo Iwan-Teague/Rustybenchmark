@@ -43,4 +43,4 @@ The initial recommendation was hand-written for categories 1–7 and mined for 8
 
 ## Related
 
-Category 10 (`multi-file-repo`) is mined *and* in the headline composite — see [ADR-0004](0004-multi-file-repo-in-headline.md). The composite is therefore not purely synthetic. This tension is deliberate: excluding real repo work entirely would be a larger validity error than including a mined category with a caveat.
+Category 10 (`cross-module`) is mined *and* in the headline composite — see [ADR-0004](0004-cross-module-in-headline.md). The composite is therefore not purely synthetic. This tension is deliberate: excluding real repo work entirely would be a larger validity error than including a mined category with a caveat.

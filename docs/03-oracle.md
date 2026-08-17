@@ -54,9 +54,45 @@ Capture **every** diagnostic, not just success/failure.
 - `error_codes: Vec<String>` — e.g. `["E0499", "E0597"]`
 - `warn_count: u32`
 - `build_ms: u64`
-- `failure_class` (derived): `borrowck | trait | type | lifetime | syntax | resolve | other`
+- `failure_class` (derived): `borrowck | trait | type | lifetime | async-send | syntax | resolve | idiom | other`
+- `diagnostic_completeness`: `full | typeck_only`
+- `classified_rate` (aggregate, per category)
 
-The `failure_class` derivation is a lookup table from rustc error codes. This is what produces the per-category diagnostic that no general-purpose benchmark can offer. Rust-SWE-bench attributes **32.6%** of agent failures to type/trait/borrow semantics — we make that number visible per model, per category, automatically.
+### `failure_class` is derived from a tuple, not from the code
+
+The obvious design — a lookup table from rustc error code to class — was **measured against rustc 1.97 on 33 realistic failure cases and found to be blind or ambiguous for a third of them** ([REVIEW-2.md](REVIEW-2.md) R2-S2):
+
+- **18% of cases produce no error code at all.** Including *both* async cases: `future cannot be sent between threads safely` — the single most characteristic async failure in Rust — carries `code: None`. The entire `async-concurrency` category would have had zero diagnostic signal.
+- **15% produce E0277**, which appeared across four different categories (error-handling, traits, unsafe, generic unsized). It carries essentially no category information.
+- **`idiom-refactor` produces zero rustc errors by construction** — non-idiomatic code compiles. Clippy catches all of it.
+
+So classification takes the whole diagnostic, plus context:
+
+```
+failure_class = classify(error_code, message_pattern, clippy_lints, category)
+```
+
+- Codeless errors are matched by **message regex** against a curated pattern table
+  (`"future cannot be sent"` → `async-send`, and so on).
+- `idiom-refactor` classifies from **clippy lint names**, which are stable identifiers and
+  a better signal than error codes would have been.
+- E0277 is disambiguated by its `help` text, which names the actual unsatisfied trait.
+- The pattern table is **built from measurement, not expectation** — one probe case predicted to
+  yield E0277 in fact yielded E0369.
+
+**`classified_rate` is published per category.** If a category's failures are 40% `other`, that is a fact about our instrumentation, and it belongs on the leaderboard rather than hidden behind a confident-looking histogram.
+
+### Borrow failures are a lower bound
+
+Type checking aborts before borrowck runs. Measured on a realistic multi-bug function containing one type error and two borrow errors, rustc emitted **two E0308s and nothing else** — the borrow errors were never reached.
+
+The histogram therefore **systematically undercounts borrow failures**, in precisely the category this project names as its niche. There is no harness-side fix; it is a property of the compiler. So:
+
+- `diagnostic_completeness` records whether borrowck was reached at all.
+- Borrow-failure counts are published **as a lower bound**, stated as such.
+- **Generator constraint:** in `borrow-lifetimes`, the skeleton should be type-complete, so a model's edit is unlikely to introduce type errors that mask the borrow signal. This belongs in the family authoring guide.
+
+Rust-SWE-bench attributes **32.6%** of agent failures to type/trait/borrow semantics. We make that visible per model and per category — with the measurement's own blind spots stated alongside it.
 
 ## L2 — Behavior (weight 0.7)
 
@@ -126,6 +162,20 @@ max_bytes     = "reference*1.25"
 The grading harness installs a counting `#[global_allocator]` and asserts an allocation budget
 derived from the reference implementation's own measured behaviour. This measures the actual
 property rather than a proxy for it, and it cannot be evaded by choosing a different API.
+
+**Measurement is differential, because a global allocator is process-global.** proptest's own
+machinery, the test harness, and the assertion framework all allocate, and there is no way to
+attribute a given allocation to "the candidate function". So the identical harness is run twice —
+once against the reference, once against the candidate — and the difference is what is bounded:
+
+```
+allocs_candidate − allocs_reference  ≤  budget
+```
+
+Harness overhead appears in both terms and cancels. No attribution is needed, and the budget is
+naturally expressed relative to the reference, which is how the constraint was already written.
+This requires the harness to be deterministic in its own allocation behaviour — same proptest seed,
+same case count, same ordering — all of which the design already guarantees.
 
 `forbidden_calls` is retained only where the constraint genuinely *is* about a specific API —
 "solve this without `RefCell`", "no `unsafe`" — not as an allocation proxy.

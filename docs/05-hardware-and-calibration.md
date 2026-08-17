@@ -61,9 +61,19 @@ Thermal throttling alone swings llama.cpp results **12–18%** between cold and 
 
 **Warm-up is not optional.** A calibration without it is not comparable to anything.
 
-### Calibration is per-segment, not per-run
+### Calibration is per-segment, and tiered
 
 A run that spans multiple sessions (see [09-resume-and-checkpointing.md](09-resume-and-checkpointing.md)) recalibrates at the start of every segment. Thermal and power state do not persist across a lid close. Timing metrics aggregate across segments with segment tags, and the run reports inter-segment calibration variance.
+
+But full calibration is ~15 minutes. In the ninety-minute evening slices this project explicitly sells, that is **17% overhead** — roughly 6.5 hours of pure measurement across a 39-hour suite. So calibration is tiered:
+
+| Segment | Calibration | Cost |
+|---|---|---|
+| 0 | **Full** — warm-up + 10 reps + sustained phase | ~15 min |
+| 1..n | **Abbreviated** — warm-up + 5 reps, no sustained phase | ~3 min |
+| any | **Escalate to full** if abbreviated deviates >10% from segment 0 | ~15 min |
+
+Overhead drops to ~3% while preserving the guarantee: a machine whose behaviour has genuinely changed triggers the full measurement automatically.
 
 If calibrated `tg128` varies more than **±10%** across segments, the run's **throughput metrics are flagged unstable**. Correctness metrics are unaffected — they do not depend on speed.
 

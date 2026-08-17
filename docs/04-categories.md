@@ -31,7 +31,7 @@ Both contribute to `capability_score`. Only core categories may be compared agai
 | 7 | `perf-optimization` | allocation removal, `&str` vs `String`, iterator fusion, SIMD-friendly loops | L4 criterion ratio primary | synth | Hardware-gated; unmeasurable on many machines |
 | 8 | `api-evolution` | post-cutoff std stabilisations, crate API migration, deprecation handling | L1 + L2; freshness-rotated | wild | Mined; supply-limited by the release calendar |
 | 9 | `test-authoring` | writing tests for a given implementation | **L4 mutation score primary** | synth | L4-dependent, so not replay-verifiable |
-| 10 | `multi-file-repo` | cross-module change in a 3–10 file crate; repo navigation | full stack; slowest tier | wild | Mined; yield for small commits unproven |
+| 10 | `cross-module` | coordinating one change across several files and modules | full stack; slowest tier | wild | Mined; yield unproven. **Does not test repo navigation** — see below |
 | 11 | `ffi-boundary` | `repr(C)`, C interop, ABI correctness, ownership across the boundary | real C shim linked at test time; **no miri** | synth | Miri cannot execute foreign calls |
 
 **72 families.** Split from the original category 4: miri can check `unsafe-core` but cannot execute FFI, which is what `ffi-boundary` is definitionally about.
@@ -44,9 +44,24 @@ Categories 1, 2, 4, 5 cover the semantics that Rust-SWE-bench attributes **32.6%
 
 Categories 3, 6, 7, 9 cover the parts of daily Rust work that determine whether a model is *pleasant* to use rather than merely correct.
 
+## What `cross-module` does and does not measure
+
+It was originally named `multi-file-repo` and claimed to test repo navigation. It cannot, and the rename records that.
+
+The category is squeezed between two constraints introduced in different documents and never reconciled ([REVIEW-2.md](REVIEW-2.md) R2-S4):
+
+- **Context limits push size down.** At 32k context, a task must be small enough to fit alongside instructions and repair diagnostics.
+- **Construct validity pushes size up.** Rust-SWE-bench's repos averaged 993 files and 128k LoC, and repo-wide comprehension is 43.7% of agent failures *precisely because the repo does not fit in the model's head*.
+
+At the size that fits in context, **the entire repository is in the prompt**. There is nothing to navigate. What remains is long-context reasoning over several files — a real capability, but not the one the old name claimed.
+
+So: `cross-module` tests **coordinating one change across several files and modules**. That is genuine and worth measuring, and it is what the category now claims.
+
+True repo navigation requires a model that can request files it has not been shown — i.e. tools — which makes it an agentic measurement. It moves to the agentic track as `repo-navigation` rather than being half-done here.
+
 ## Category 10 is in the headline number
 
-Earlier draft treated `multi-file-repo` as an opt-in extra. That was wrong, and the reversal is recorded in [ADR-0004](adr/0004-multi-file-repo-in-headline.md).
+Earlier draft treated `cross-module` as an opt-in extra. That was wrong, and the reversal is recorded in [ADR-0004](adr/0004-cross-module-in-headline.md).
 
 Real Rust fix patches average **9.8 files and 139.9 lines** (Python SWE-bench Verified: 1.25 files / 14.3 lines). A Rust benchmark composed only of single-file puzzles measures something meaningfully different from Rust work. Excluding the category would bias the entire benchmark toward toy tasks.
 
@@ -83,7 +98,7 @@ Default composite: **equal weight per category.** Not per family — otherwise a
 
 ```
 capability_score      = mean over all 11 categories of (mean task_score within category)
-capability_score_lite = mean over categories 1-9 and 11 (excludes multi-file-repo)
+capability_score_lite = mean over the 10 categories excluding `cross-module`
 ```
 
 Probe categories are noisier individually but contribute acceptably to an 11-way mean. Alternative weightings (usage-frequency, difficulty) are published as secondary columns once there is data to justify them, never as the default.

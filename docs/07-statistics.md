@@ -92,9 +92,11 @@ explicitly directional-only). See [04-categories.md](04-categories.md) and
 
 ## Paired design — free 2–4× power
 
-**Every model in an epoch runs the identical seed set.** Comparison then uses McNemar on discordant pairs rather than two independent proportions. Models fail on correlated items, so pairing cancels most of the item variance — typically a 2–4× reduction in the N required for the same power.
+**Every model in an epoch runs the identical scored seed set.** Comparison then uses McNemar on discordant pairs rather than two independent proportions. Models fail on correlated items, so pairing cancels most of the item variance — typically a 2–4× reduction in the N required for the same power.
 
-Cost: one line of policy. Seeds are fixed per epoch, not per submission. This dovetails exactly with the T2 challenge-nonce issuance scheme in [10-integrity.md](10-integrity.md): a per-epoch nonce produces a per-epoch seed set.
+This requirement collides head-on with the anti-precomputation design, which wants seeds that did not exist before the run was requested. A single derivation cannot serve both. Resolved by splitting each epoch into a **paired core** (~85%, fixed per epoch, scored) and a **fresh probe** (~15%, per-batch nonce, never scored, used only as a precomputation detector) — see [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md).
+
+All precision figures in this document are computed on the **core** set only. Probe units are **additional**, not carved out of the scored count — so a `deep` run executes 1088 scored core units *plus* ~163 probe units, and its wall clock is ~15% above the scored-only figure. The suite table below states both.
 
 ## Suite sizing
 
@@ -120,13 +122,13 @@ by 2–3×.
 
 Corpus: **272 families** — 5 core × 40, 6 probe × 12. See [04-categories.md](04-categories.md).
 
-| Suite | Families | Seeds | Instances | Mode | Eff. N | ±CI overall | ±CI core cat | ±CI probe cat | @20 tok/s | @60 tok/s |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `smoke` | 60 | 1 | 60 | single-shot | 60 | ±12.7% | n/a | n/a | ~55 min | ~25 min |
-| `standard` | 272 | 2 | 544 | repair | ~418 | ±4.8% | ±15.1% | ±27.6% | ~13.3 h | ~6.0 h |
-| `deep` | 272 | 4 | 1088 | repair + L4 | ~573 | ±4.1% | **±10.7%** | ±19.6% | ~38.7 h | ~17.6 h |
+| Suite | Families | Seeds | Scored units | + probe | Mode | Eff. N | ±CI overall | ±CI core cat | ±CI probe cat | @20 tok/s | @60 tok/s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `smoke` | 60 | 1 | 60 | — | single-shot | 60 | ±12.7% | n/a | n/a | ~55 min | ~25 min |
+| `standard` | 272 | 2 | 544 | +82 | repair | ~418 | ±4.8% | ±15.1% | ±27.6% | ~15.3 h | ~7.0 h |
+| `deep` | 272 | 4 | 1088 | +163 | repair + L4 | ~573 | ±4.1% | **±10.7%** | ±19.6% | ~44.5 h | ~20.2 h |
 
-All figures at ICC = 0.3. See the sensitivity grid below.
+All figures at ICC = 0.3. Precision columns are computed on scored units only; wall-clock columns include the probe. `smoke` carries no probe — it is not submittable for ranking, so precomputation detection is moot. See the sensitivity grid below.
 
 ### ICC sensitivity
 

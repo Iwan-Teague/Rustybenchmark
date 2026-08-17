@@ -76,7 +76,11 @@ One `frozen` task, no generation. Prove the loop end to end.
 
 Get this right and the rest is repetition.
 
-- `bench-gen`: seed derivation, canary minting, ablation helpers, prompt+skeleton distance
+- `bench-gen`: seed derivation, canary minting, prompt+skeleton distance
+- **Both generator archetypes** — parametric (synthesise → ablate) *and* compositional
+  (synthesise → inverse-transform), plus the invertible `syn` transform catalogue that
+  `de_idiomatize` needs. This was unbudgeted before [REVIEW-2.md](REVIEW-2.md) R2-S6 and is a
+  framework change, not a per-family one
 - **One exemplary family** — `borrowck/split-mut-window` — to full quality
 - `validate-family` with all ten CI gates
 - **A second family in a deliberately awkward category** (`idiom-refactor` or `error-handling`), specifically to find out whether structural seeding generalises or collapses to cosmetic variation
@@ -128,7 +132,7 @@ Run across several models and several machines. Publish the analysis.
 
 - Remaining core categories (2 × 40 = 80 families)
 - All probe categories (6 × 12 = 72 families)
-- Mining pipeline for `multi-file-repo` and `api-evolution`
+- Mining pipeline for `cross-module` and `api-evolution`
 - Async oracle resolution (see **Q11**) before `async-concurrency` is authored
 - L4 quality layer where categories need it
 - Epoch rotation in production
@@ -148,10 +152,10 @@ Numeric thresholds, decided in advance, so a bad result triggers a decision rath
 
 | Gate | When | Threshold | If it fails |
 |---|---|---|---|
-| **G1** Windows sandbox | P1 week 1 | Network denial + memory limits demonstrably enforced | Windows runs at reduced trust tier, or requires WSL2, or is unsupported at launch. Decide then, not later — it affects a large share of the consumer audience |
+| **G1** Windows sandbox | P1 week 1 | **rustc and cargo function inside an AppContainer** with network capabilities withheld, and the escape tests fail correctly | Windows runs at reduced trust tier, or requires WSL2, or is unsupported at launch. Decide then, not later — it affects a large share of the consumer audience. Note the real risk is ACLs, not isolation: AppContainer denies network without a kernel driver, but the AppContainer SID must be granted access to the workspace, `CARGO_HOME`, and the rustup toolchain, and toolchains can break under capability-based ACLs |
 | **G2** ICC | End of P3.5 | ICC ≤ 0.5 | At ICC > 0.5, seeds are worth little and per-core-category CI floors near ±12%. **Pivot:** raise core categories to 60 families and cut to 4 core categories, or accept that only the overall score is rankable |
 | **G3** Authoring rate | End of P3 | A new contributor authors a validated family in ≤ 2 days | At > 3 days/family the corpus is a 3-year project. **Pivot:** cut to 3 core categories, or invest another 4 weeks purely in generation tooling before proceeding |
-| **G4** Mining yield | Before P7 mining work | ≥ 12 usable small-commit families per mined category | Rust-SWE-bench yielded ~0.6% from ~80k PRs, and we additionally restrict to small commits. **Pivot:** drop `multi-file-repo` to hand-written multi-file synthesis, losing realism but keeping the category |
+| **G4** Mining yield | Before P7 mining work | ≥ 12 usable families per mined category, drawn from **workspace member crates** at ≥200 stars and ≤5k LoC | The original filter (>1k stars **and** ≤2k LoC) was self-contradictory — Rust-SWE-bench's >1k-star pool averaged 993 files and 128k LoC, so the two constraints were nearly disjoint. Mining crates rather than repos is the fix. Yield is still unforgiving: 0.6% from ~80k PRs with no size constraint at all. **Pivot:** drop `cross-module` to hand-written multi-file synthesis, losing realism but keeping the category |
 | **G5** Minimum viable hardware | End of P4 | `smoke` completes in < 90 min on 8 GB VRAM | The consumer-hardware promise is unmet. Shrink `smoke`, or raise the stated minimum and say so plainly |
 
 ---
