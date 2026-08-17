@@ -16,10 +16,10 @@ Rustybenchmark answers both, in one run, and keeps them clearly separated becaus
 - **Rust-native.** Grade on the signals Rust uniquely provides: rustc diagnostic codes, clippy, `unsafe` counts, miri, trait/lifetime semantics. Not just pass/fail.
 - **Contamination-resistant by construction.** Tasks are generators. A model cannot memorise an instance it has never seen. Seeds rotate per epoch.
 - **Runs on consumer hardware.** Target band is 8–24 GB VRAM, laptops included. The smallest suite finishes inside an hour.
-- **Category-resolved.** Ten Rust skill areas, scored independently, with honest confidence intervals on each.
+- **Category-resolved.** Eleven Rust skill areas, scored independently, with honest confidence intervals on each — and an explicit split between the five that are precise enough to rank and the six that are directional only.
 - **Hardware-aware.** Every run profiles and calibrates the host so results are comparable and so machine capability is itself a published output.
 - **Verifiable.** Correctness claims are re-checkable server-side. Everything that cannot be verified says so on the leaderboard.
-- **Resumable.** A two-day suite must survive being run in ninety-minute evening slices.
+- **Resumable.** A 39-hour suite must survive being run in ninety-minute evening slices.
 
 ## Non-goals
 

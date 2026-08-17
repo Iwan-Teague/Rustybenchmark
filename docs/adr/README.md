@@ -13,3 +13,4 @@ Format: context, options, decision, consequences. Reversals keep the original re
 | [0005](0005-execution-classes-not-gpu-only.md) | Classify execution mode, do not restrict to GPU | Accepted |
 | [0006](0006-breadth-over-depth-in-sampling.md) | More families beats more seeds per family | Accepted |
 | [0007](0007-trust-tiers-over-client-attestation.md) | Server-side replay over client attestation | Accepted |
+| [0008](0008-core-and-probe-categories.md) | Core (40 families, rankable) vs probe (12, directional) categories | Accepted, from [REVIEW.md](../REVIEW.md) S3 |

@@ -43,9 +43,13 @@ seed_space = "u64"
 # memorisation-resistant family; a renamer-only generator is worthless.
 variance = { structural = true, naming = true, numeric = true, api_surface = true }
 
-# Anti-twin floor: minimum normalised tree-edit distance between the reference
-# implementations of any two instances of this family. Enforced in CI.
-min_instance_distance = 0.25
+# Anti-twin floor: minimum normalised tree-edit distance between any two instances
+# of this family, measured on PROMPT + SKELETON -- what the model actually sees.
+# Reference-implementation distance is checked as a secondary signal only: two
+# instances can have distant references and near-identical prompts, which is the
+# same question from the model's point of view. Enforced in CI.
+min_instance_distance     = 0.25   # prompt + skeleton (primary)
+min_reference_distance    = 0.20   # reference impl    (secondary)
 
 [interaction]
 mode          = "repair"          # single-shot | repair | agentic
@@ -155,7 +159,8 @@ Every one of these is a hard gate. A family that fails any of them does not ship
 | Skeleton **fails** the oracle | Ablation actually removed the answer |
 | `todo!()`, `unimplemented!()`, empty body all fail | No trivial pass |
 | Returning the skeleton unchanged fails | No copy-through pass |
-| Pairwise normalised tree-edit distance ≥ `min_instance_distance` | Instances are not renamed twins |
+| Pairwise prompt+skeleton distance ≥ `min_instance_distance` | Instances are not renamed twins *from the model's point of view* |
+| Pairwise reference distance ≥ `min_reference_distance` | Secondary structural check |
 | Reference compiles clean under the family's own `constraints.toml` | The constraints are satisfiable |
 | Generation is deterministic: same seed → byte-identical instance | Resume and replay depend on this |
 | Prompt contains exactly one canary, and no oracle content | No leakage into the model's view |

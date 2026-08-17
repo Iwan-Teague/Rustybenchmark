@@ -39,13 +39,14 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 
 Supporting:
 
+- **[docs/REVIEW.md](docs/REVIEW.md)** — adversarial review round 1. Read this alongside the docs it corrects; several published figures were wrong and the category design changed as a result
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — terms used precisely throughout
-- [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with owners
+- [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with the phase each blocks
 - [docs/adr/](docs/adr/) — architecture decision records, including reversals
 
 ## The one-paragraph version
 
-Static coding benchmarks rot: models memorise them. Rustybenchmark ships **generators**, not answers. Each task family is a function from a seed to a fresh problem instance, its reference implementation, and its property-based oracle — all constructed from the same seed, so the oracle is correct by construction and the instance has never been seen. Grading is deterministic given the seed, which means the server can independently re-verify any submitted correctness claim. Hardware claims cannot be verified, so they are reported separately and at a lower trust level. Runs checkpoint continuously and resume across sessions, because the largest suite takes two days on consumer hardware.
+Static coding benchmarks rot: models memorise them. Rustybenchmark ships **generators**, not answers. Each task family is a function from a seed to a fresh problem instance, its reference implementation, and its property-based oracle — all constructed from the same seed, so the oracle is correct by construction and the instance has never been seen. Grading is deterministic given the seed, which means the server can independently re-verify any submitted correctness claim. Hardware claims cannot be verified, so they are reported separately and at a lower trust level. Runs checkpoint continuously and resume across sessions, because the largest suite takes around 39 hours on consumer hardware.
 
 ## License
 

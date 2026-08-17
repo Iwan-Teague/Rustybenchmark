@@ -31,7 +31,7 @@ Every static coding benchmark decays. Models memorise them, and the decay is mea
 
 **Bad**
 
-- Authoring cost is the entire project. ~165 hand-written generators.
+- Authoring cost is the entire project. ~236 hand-written generators.
 - A buggy generator silently corrupts every score derived from it. Mitigated by the nine-gate CI validation in [02-task-format.md](../02-task-format.md), especially the independently-written second reference.
 - Synthetic tasks risk measuring the author's taste in puzzles rather than real Rust work. Mitigated by [ADR-0002](0002-hand-written-and-mined-suites.md).
 - A generator that only permutes identifiers is memorisable and worthless. Mitigated by the `min_instance_distance` tree-edit-distance gate.

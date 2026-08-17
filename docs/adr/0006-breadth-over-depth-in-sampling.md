@@ -27,7 +27,7 @@ Sixteen seeds of one family buys roughly **2.9 independent items**.
 
 ## Decision
 
-**Prioritise family count.** Target 200–250 families (20–25 per category), with 1–16 seeds each depending on suite tier.
+**Prioritise family count.** Target 272 families — 5 core categories at 40, 6 probe categories at 12 ([ADR-0008](0008-core-and-probe-categories.md)) — with 1–4 seeds each depending on suite tier.
 
 Concretely, for the same 600 instances:
 
@@ -53,7 +53,7 @@ Supporting decisions:
 
 **Bad**
 
-- Reinforces that authoring ~200 families is the project. There is no shortcut.
+- Reinforces that authoring ~272 families is the project. There is no shortcut.
 - Users running `smoke` or `standard` get a number they cannot rank with. Handled by displaying those rows greyed and explicitly marked *insufficient precision for ranking*, rather than rejecting them.
 - ICC = 0.3 is an assumption. `rustybench calibrate-suite` measures it empirically once submissions exist; seeds-per-family is then retuned from data rather than from this estimate.
 

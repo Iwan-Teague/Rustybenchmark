@@ -36,7 +36,7 @@ Therefore: **breadth beats depth, decisively.**
 > 200 families × 3 seeds = 600 instances ≈ 400 effective
 > 50 families × 12 seeds = 600 instances ≈ 155 effective
 
-Same compute, **2.6× the statistical power**. This is the single most consequential number in the design, and it is why the family count (200–250) matters far more than the seed count.
+Same compute, **2.6× the statistical power**. This is the single most consequential number in the design, and it is why the family count (272) matters far more than the seed count.
 
 It also answers "surely we need an average?" — yes, but the average that carries information is *across families*, not across repeats of the same family. Repeats mostly re-measure something already known.
 
@@ -58,6 +58,38 @@ To separate them at **5 points**: ~1,530 effective items per arm.
 
 That second number is why pairing matters.
 
+> **Note on the formula.** `task_score` is continuous on [0, 1], not binary, so the binomial
+> expression is not exactly right. It is a *conservative upper bound*: the variance of any
+> variable bounded on [0, 1] is at most 0.25, so these CIs are never too narrow. The reported
+> CI is always the cluster bootstrap, not this formula; the table exists for sizing decisions.
+
+## The ceiling that seeds cannot raise
+
+As seeds per family → ∞, the design effect grows linearly, so effective N per category converges:
+
+```
+lim (m × F) / (1 + (m−1) × ICC)  =  F / ICC
+m→∞
+```
+
+**Per-category precision is bounded by family count alone.** No amount of seeding escapes it.
+
+| Families per category | ICC 0.2 | ICC 0.3 | ICC 0.5 | ICC 0.7 |
+|---|---|---|---|---|
+| 12 | ±12.7% | ±15.5% | ±20.0% | ±23.7% |
+| 20 | ±9.8% | **±12.0%** | **±15.5%** | ±18.3% |
+| 30 | ±8.0% | ±9.8% | ±12.7% | ±15.0% |
+| 40 | ±6.9% | **±8.5%** | ±11.0% | ±13.0% |
+| 45 | ±6.5% | ±8.0% | ±10.3% | ±12.2% |
+
+This is the finding that reshaped the category design. At the originally planned 20 families per
+category, the radar chart — the product's most distinctive feature — would carry ±12–16% error bars
+at *any* suite size, forever. "Better at traits than at lifetimes" would never be supportable.
+
+Resolution: categories split into **core** (40 families, rankable) and **probe** (12 families,
+explicitly directional-only). See [04-categories.md](04-categories.md) and
+[ADR-0008](adr/0008-core-and-probe-categories.md).
+
 ## Paired design — free 2–4× power
 
 **Every model in an epoch runs the identical seed set.** Comparison then uses McNemar on discordant pairs rather than two independent proportions. Models fail on correlated items, so pairing cancels most of the item variance — typically a 2–4× reduction in the N required for the same power.
@@ -66,24 +98,69 @@ Cost: one line of policy. Seeds are fixed per epoch, not per submission. This do
 
 ## Suite sizing
 
-Assumptions: ~55 s per instance single-shot on a 20 tok/s local model (30 s generate + 10 s prefill + 12 s warm cargo build and grade); ~110 s with repair. Roughly 2.2× faster on a 4090-class box at ~60 tok/s.
+### Timing model
 
-| Suite | Families | Seeds | Instances | Eff. N | ±CI overall | ±CI per category | @20 tok/s | @60 tok/s |
-|---|---|---|---|---|---|---|---|---|
-| `smoke` | 60 | 1 | 60 | 60 | ±12.6% | n/a | ~55 min | ~25 min |
-| `standard` | 200 | 2 | 400 | ~308 | ±5.6% | ±17% | ~6.1 h | ~2.8 h |
-| `deep` | 200 | 6 | 1200 | ~632 | ±3.9% | ±12% | ~18.3 h | ~8.4 h |
-| `full` | 200 | 16 | 3200 | ~872 | ±3.3% | ±10% | ~49 h | ~22 h |
+Per-instance cost, on a 20 tok/s local model:
 
-Read the two precision columns carefully.
+```
+prefill        ~10 s     (2k-token prompt at ~200 tok/s)
+generate       ~30 s     (600 completion tokens)
+build + grade  ~12 s     (warm cargo cache, L0-L3)
+               ------
+single-shot     ~55 s
+repair mode     ~88 s    (2 attempts on the ~60% that fail attempt 1)
++ L4 quality   ~128 s    (cargo-mutants + criterion)
+```
 
-**Overall score converges fast. Per-category scores do not.** At `standard`, a category score of 45% carries roughly ±17 points. You cannot honestly say "this model is better at traits than at lifetimes" from that. **Category-level claims require `deep` minimum.**
+`repair` is the **default** interaction mode and L4 is **mandatory at `deep`**, so both must be in
+the estimate. The earlier draft costed only the 55 s single-shot path and understated every suite
+by 2–3×.
+
+### Suites
+
+Corpus: **272 families** — 5 core × 40, 6 probe × 12. See [04-categories.md](04-categories.md).
+
+| Suite | Families | Seeds | Instances | Mode | Eff. N | ±CI overall | ±CI core cat | ±CI probe cat | @20 tok/s | @60 tok/s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `smoke` | 60 | 1 | 60 | single-shot | 60 | ±12.7% | n/a | n/a | ~55 min | ~25 min |
+| `standard` | 272 | 2 | 544 | repair | ~418 | ±4.8% | ±15.1% | ±27.6% | ~13.3 h | ~6.0 h |
+| `deep` | 272 | 4 | 1088 | repair + L4 | ~573 | ±4.1% | **±10.7%** | ±19.6% | ~38.7 h | ~17.6 h |
+
+All figures at ICC = 0.3. See the sensitivity grid below.
+
+### ICC sensitivity
+
+ICC is an **assumption, not a measurement** (see [REVIEW.md](REVIEW.md) S2). Overall effective N and
+±CI for `deep` (272 × 4 = 1088 instances) across plausible values:
+
+| ICC | Design effect | Eff. N | ±CI overall | ±CI core cat |
+|---|---|---|---|---|
+| 0.2 | 1.6 | 680 | ±3.8% | ±9.6% |
+| 0.3 | 1.9 | 573 | ±4.1% | ±10.7% |
+| 0.5 | 2.5 | 435 | ±4.7% | ±12.3% |
+| 0.7 | 3.1 | 351 | ±5.2% | ±13.7% |
+
+Suite sizing is **provisional until Phase 3.5 measures the real ICC**. That experiment is a hard
+gate before corpus scale-up.
+
+### There is no `full` suite
+
+An earlier draft specified `full` at 16 seeds. It was deleted. Going 4 → 16 seeds improves
+per-core-category CI from ±10.7% to roughly ±9% for **4× the wall clock** — over 110 hours at
+20 tok/s. The S3 ceiling means the money is in families, never in seeds.
+
+If someone wants more precision than `deep`, the answer is more families, not more seeds.
 
 ### Leaderboard policy
 
-**`deep` is the minimum tier for a ranked row.** `standard` and `smoke` submissions are accepted and displayed, greyed, marked *insufficient precision for ranking*.
-
-This single rule is what stops the leaderboard degenerating into noise, and it is far easier to enforce from day one than to introduce later.
+- **`deep` is the minimum tier for a ranked row.** `standard` and `smoke` are accepted, displayed
+  greyed, marked *insufficient precision for ranking*.
+- **Core category scores are rankable at `deep`** (±10.7%). Two models must differ by roughly
+  15 points before a core-category difference is claimable, and the claim uses the paired
+  bootstrap, not overlapping CIs.
+- **Probe category scores are never ranked.** They are displayed as directional indicators with
+  their CIs shown, and the UI does not offer sorting on them. A ±19.6% error bar cannot support
+  an ordering and should not be presented as if it could.
 
 ## Sampling protocol
 

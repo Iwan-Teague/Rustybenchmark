@@ -1,6 +1,6 @@
 # 09 — Resume and checkpointing
 
-The `full` suite takes ~49 hours at 20 tok/s. Nobody has 49 uninterrupted hours. A run must survive being executed in ninety-minute evening slices across two weeks, and must survive crashes, kernel panics, and lid closes without corrupting its own results.
+The `deep` suite takes ~39 hours at 20 tok/s. Nobody has 39 uninterrupted hours. A run must survive being executed in ninety-minute evening slices across two weeks, and must survive crashes, kernel panics, and lid closes without corrupting its own results.
 
 ## The property that makes this easy
 
@@ -166,11 +166,11 @@ rustybench status 01K3F...
   stability tg128 across segments: 41.2 / 40.8 / 38.1 / 41.2  -> +/- 4.0%  OK
 ```
 
-The partial score is computed and shown at every status check. Its CI is honest about the reduced N, and the report is clearly marked partial. Being able to see a converging estimate mid-run is a large part of what makes a two-day benchmark bearable to run.
+The partial score is computed and shown at every status check. Its CI is honest about the reduced N, and the report is clearly marked partial. Being able to see a converging estimate mid-run is a large part of what makes a 39-hour benchmark bearable to run.
 
 ## Interaction with challenge windows
 
-A T2 challenged run cannot fit a 49-hour execution inside a six-hour anti-precomputation window. Resolved by **batched challenge issuance** rather than one long window:
+A T2 challenged run cannot fit a 39-hour execution inside a six-hour anti-precomputation window. Resolved by **batched challenge issuance** rather than one long window:
 
 - The client requests seed batch *k* (e.g. 50 units).
 - The server returns `{batch_nonce, expires_at}` with a short window (hours).

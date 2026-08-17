@@ -33,7 +33,9 @@ Client computes scores, signs with an embedded key, uploads. Verifies nothing. G
 
 Client uploads the model's raw output artifacts alongside the scores. The server re-materialises each instance from its seed, runs the identical oracle in its own sandbox, and compares. Any mismatch → rejected and flagged.
 
-**This eliminates score fabrication entirely.** It costs the server CPU and nothing else. It is the single highest-leverage control in the system.
+**This eliminates fabrication of L0–L3 scores entirely.** It costs the server CPU and nothing else. It is the single highest-leverage control in the system.
+
+**Boundary: L4 cannot be replayed.** Criterion timings are hardware-dependent by design and cargo-mutants is not deterministic, so the server cannot reproduce L4 numbers. Replay therefore verifies **L0–L3 exactly** and subjects **L4 to plausibility bounds only**. L4's contribution to any score is labelled at T0 confidence even inside a T2 row. Categories whose oracle is L4-dominant — `perf-optimization`, `test-authoring` — are consequently the least verifiable in the suite, which is one reason both are probe rather than core categories.
 
 ### T2 — Challenged
 
@@ -47,9 +49,11 @@ Since the nonce did not exist before the request, precomputed or binary-embedded
 
 **T2 + T1 is the default requirement for a ranked leaderboard row.**
 
+**What T2 does not prove.** It bounds *precomputation*, nothing more. A submitter can receive a batch and solve it with a stronger model, a hosted API, or a human within the window. Model attribution rests entirely on the probabilistic plausibility checks below — error-code fingerprinting and throughput consistency — and those raise the cost of lying without ever proving authorship. A T2 badge should be read as "these tasks were fresh", not as "this model produced these answers".
+
 #### Batched issuance (required for long runs)
 
-A `full` suite takes ~49 hours; it cannot sit inside a short anti-precomputation window. So the nonce is issued per batch, not per run:
+A `deep` suite takes ~39 hours; it cannot sit inside a short anti-precomputation window. So the nonce is issued per batch, not per run:
 
 ```
 client: POST /challenge/batch { run_id, batch_index }

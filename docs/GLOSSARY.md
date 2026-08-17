@@ -46,7 +46,7 @@ Terms used precisely throughout these documents. Where a word has a loose everyd
 
 **Spec** — the seed-sampled structural parameters of an instance: lifetimes, bounds, sizes, chosen API route, identifier pool. Everything else is derived from it.
 
-**Suite** — a named collection of families and seeds-per-family: `smoke`, `standard`, `deep`, `full`. Also, separately, `synth` vs `wild` as corpus designations.
+**Suite** — a named collection of families and seeds-per-family: `smoke`, `standard`, `deep`. Also, separately, `synth` vs `wild` as corpus designations.
 
 **Tainted** — a run whose identity invariants were violated and which proceeded under `--force-heterogeneous`. Permanently ineligible for ranking. Cannot be un-tainted.
 

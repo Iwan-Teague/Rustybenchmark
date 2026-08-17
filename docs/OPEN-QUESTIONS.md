@@ -82,6 +82,28 @@ Arguments for: gives readers an anchor, makes the local-model numbers interpreta
 
 ---
 
+## Q11 — What is the async oracle?
+
+**Blocks:** authoring `async-concurrency` (Phase 7). Raised by [REVIEW.md](REVIEW.md) S10.
+
+The differential oracle compares candidate and reference outputs on generated inputs. Under nondeterministic scheduling there is no stable output to compare, so the specification as written either produces spurious failures from scheduling variance or degenerates into a compile check.
+
+Working hypothesis: grade on **linearizability properties under loom's exhaustive scheduling** where the state space is small enough, and on `Send`/`Sync`/cancellation-safety **constraints** otherwise — i.e. treat the category as constraint-dominant like `borrow-lifetimes`. Loom's state-space explosion is the binding constraint on how large a task can be.
+
+Needs a spike before the category is authored. Until resolved, `async-concurrency` stays a probe category.
+
+---
+
+## Q12 — Context limits for `multi-file-repo`
+
+**Blocks:** Phase 7. Raised by [REVIEW.md](REVIEW.md) S13.
+
+A 3–10 file, ≤2k LoC repo plus instructions plus repair diagnostics can exceed a 32k context. Small-context models would be scored on a category they were structurally prevented from attempting, conflating context window with capability.
+
+Options: declare a minimum context per suite and refuse below it; provide a retrieval interface so the model requests files; score `skipped_context` as a separate outcome rather than as failure. Leaning toward the first plus the third — refusing is honest, and a retrieval interface turns the category into an agentic benchmark, which is a different measurement.
+
+---
+
 ## Q10 — Epoch length
 
 **Blocks:** Phase 6.

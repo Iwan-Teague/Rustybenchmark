@@ -47,7 +47,7 @@ also record: peak accelerator memory, peak host RSS,
 
 ### The sustained phase — our addition
 
-Standard tooling stops at the short burst. That hides the fact that matters most for a two-day benchmark run.
+Standard tooling stops at the short burst. That hides the fact that matters most for a 39-hour benchmark run.
 
 ```
 sustained:   10 minutes of bench-shaped load

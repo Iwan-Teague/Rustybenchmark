@@ -1,14 +1,47 @@
 # 14 — Roadmap
 
-## Honest cost statement
+## Assumptions this plan is built on
 
-The corpus is the project. ~165 hand-written solution-first generators, each with reference synthesis, property derivation, ablation, and a CI validation harness — call it **1–3 days each once the framework exists**. Plus ~35 mined families and the mining pipeline.
+State them, because a plan whose assumptions are hidden cannot be falsified.
 
-Everything else — sandbox, oracle, hardware profiling, statistics, resume, attestation, server — is perhaps 3–4 months of focused work and then mostly stable.
+- **1 FTE.** All durations below are one full-time person. Two people roughly halves the framework phases and does very little to the corpus phase, which parallelises across contributors rather than across teammates.
+- **Family authoring: 1–3 days each, once the framework exists.** This is the largest and least-validated number in the plan. Gate G3 tests it.
+- **ICC ≈ 0.3.** Unmeasured. Gate G2 tests it. Suite sizing is provisional until then.
+- **Corpus: 272 families.** 5 core × 40, 6 probe × 12.
 
-The conclusion that follows: **over-invest in the framework and in `bench-tasks` ergonomics.** Generators 2 through 200 are only tractable if generator 1 established a good pattern and good helpers. Every hour spent making family authoring pleasant pays back ~200 times.
+## The honest cost statement
 
-## Phase 0 — Spine (weeks 1–3)
+272 families × 1–3 days = **272–816 person-days**. At 1 FTE that is **1 to 3 years** for the corpus alone, on top of ~4–5 months of framework.
+
+The earlier draft implied "months 6–18". That was wrong by a factor of two or more, and pretending otherwise would mean planning against a schedule that cannot be met.
+
+Two consequences follow, and they shape everything below:
+
+1. **Over-invest in the framework and in `bench-tasks` ergonomics.** Generators 2 through 272 are only tractable if generator 1 established a good pattern and good helpers. An hour spent making family authoring pleasant pays back ~270 times. This is the highest-leverage work in the project.
+2. **Design for external contribution from Phase 3, not as an afterthought.** A family is a self-contained PR validated by nine mechanical CI gates — the maintainer does not have to review anyone's statistics or re-derive their oracle. That property is unusual and it is the only realistic path to 272 families. Treat contributor experience as a Phase 3 exit criterion.
+
+---
+
+## Critical path
+
+```
+P0 spine ──► P2 oracle depth ──► P3 generation ──► G3 ──► P3.5 ICC ──► G2 ──► P5 first data ──► P7 corpus
+                                      │                                          │
+P1 sandbox+hw ────────────────────────┘                          P4 resumability ┘
+                                                                        │
+                                                       P6 attestation ──┘
+```
+
+**On the critical path:** P0 → P2 → P3 → P3.5 → P5 → P7.
+**Parallelisable:** P1 (independent of task content), P4 (independent of corpus), P6 (independent of everything until P5 ends).
+
+The corpus (P7) is the long pole and cannot start until the generation pattern is proven (G3) and the sizing is confirmed (G2). Everything before those two gates exists to de-risk them.
+
+---
+
+## Phases
+
+### P0 — Spine · 3 weeks · *critical path*
 
 One `frozen` task, no generation. Prove the loop end to end.
 
@@ -17,89 +50,123 @@ One `frozen` task, no generation. Prove the loop end to end.
 - `bench-oracle` L0 + L1 + L2-unit only
 - `bench-cli run` writing JSONL
 
-**Exit criterion:** `rustybench run` against a real local model produces a scored journal line.
+**Exit:** `rustybench run` against a real local model produces a scored journal line.
 
-## Phase 1 — Containment and hardware (weeks 3–6)
+### P1 — Containment and hardware · 3 weeks · *parallel*
 
-Independent of task content, so it can proceed in parallel with Phase 2 thinking.
-
-- `bench-sandbox` on all three platforms, with the escape-attempt test suite
-- `bench-hw` inventory + calibration + sustained phase + pre-run gates
+- `bench-sandbox` on all three platforms, with the escape-attempt suite
+- `bench-hw` inventory, calibration, sustained phase, pre-run gates
 - `ExecClass` and `MemProfile` recorded from the first run onward
 
-**Exit criterion:** the escape tests fail correctly on macOS, Linux, and Windows; calibration numbers are reproducible within ±5% across repeat runs on the same machine.
+**Exit:** escape tests fail correctly on macOS, Linux, and Windows; calibration reproducible within ±5% across repeat runs on one machine.
 
-## Phase 2 — Oracle depth (weeks 5–8)
+**Risk:** Windows parity (netns/seatbelt are well-trodden; job objects + WFP are not). Spike this in week 1, not week 3 — see **G1**.
 
-- L3 constraint layer with `syn`-based AST checks — cheap, high signal, very Rust
-- L2 property + differential sub-oracles with seeded proptest
+### P2 — Oracle depth · 3 weeks · *critical path*
+
+- L3 constraint layer, `syn`-based AST checks
+- **Allocation instrumentation** — counting `#[global_allocator]` with a reference-derived budget
+- L2 property + differential sub-oracles, seeded proptest
+- Per-category weight support
 - `failure_class` derivation from rustc error codes
 
-**Exit criterion:** a deliberately-wrong-but-test-passing solution is caught by the property oracle.
+**Exit:** a deliberately-wrong-but-tests-passing solution is caught by the property oracle, **and** a clone-everything solution to a `borrow-lifetimes` task scores near zero.
 
-## Phase 3 — Generation (weeks 7–12)
+### P3 — Generation · 6 weeks · *critical path, pivotal*
 
-The pivotal phase. Get this right and the rest is repetition.
+Get this right and the rest is repetition.
 
-- `bench-gen`: seed derivation, canary minting, ablation helpers, tree-edit distance
-- **One exemplary family**, `borrowck/split-mut-window`, done to full quality
-- `validate-family` with all nine CI gates
-- Second and third families, authored by following the first, to test whether the pattern generalises
+- `bench-gen`: seed derivation, canary minting, ablation helpers, prompt+skeleton distance
+- **One exemplary family** — `borrowck/split-mut-window` — to full quality
+- `validate-family` with all ten CI gates
+- **A second family in a deliberately awkward category** (`idiom-refactor` or `error-handling`), specifically to find out whether structural seeding generalises or collapses to cosmetic variation
+- Contributor documentation and a `cargo generate` family template
 
-**Exit criterion:** a family can be authored in under two days by following the exemplar, and passes 1000-seed validation.
+**Exit / Gate G3:** a third family, authored by someone following the exemplar and the docs, lands in **under two days** and passes 1000-seed validation.
 
-## Phase 4 — Runs that survive reality (weeks 10–14)
+### P3.5 — ICC measurement · 2 weeks · *critical path, hard gate*
+
+The experiment that the earlier draft omitted entirely, and on which all suite sizing depends.
+
+- 20 families × 16 seeds × 3 models ≈ 960 units ≈ 24 h of compute
+- Compute per-family and pooled ICC
+- Recompute suite sizing, family budgets, and every published CI from the measured value
+
+**Exit / Gate G2:** measured ICC in hand; `deep` suite definition finalised.
+
+### P4 — Runs that survive reality · 4 weeks · *parallel*
 
 - `bench-run`: plan freezing, journal, segments, resume, validity gates
-- Crash-injection test suite
-- Scheduling controls (`--max-duration`, `--until`, `--pause-on-battery`)
+- Crash-injection suite
+- Scheduling controls
 - `status` with partial scores and ETA
-- `bench-stats`: cluster bootstrap, effective N, honest CIs
+- `bench-stats`: cluster bootstrap, ICC estimation, McNemar, effective N
 
-**Exit criterion:** a run killed at every stage boundary resumes to bit-identical final results.
+**Exit:** a run killed at every stage boundary resumes to bit-identical final results.
 
-## Phase 5 — First real data (weeks 12–20)
+### P5 — First real data · 8 weeks · *critical path*
 
-- **3 categories × 20 families = 60 families.** `deep` tier on that subset gives roughly ±14% per category and a defensible overall number — already better-grounded than most published local-model coding comparisons.
-- Suggested first three: `borrow-lifetimes`, `traits-generics`, `error-handling`. Most Rust-distinctive, all synthesisable, no miri/criterion dependency.
-- Run across several models and several machines. Publish the analysis, not a leaderboard.
+**Three core categories × 40 families = 120 families.** Suggested: `borrow-lifetimes`, `traits-generics`, `error-handling` — most Rust-distinctive, all synthesisable, no miri or criterion dependency.
 
-**Exit criterion:** a written report with real numbers and honest error bars. This is the first thing the outside world sees, and it should be a paper-shaped artifact rather than a website.
+Run across several models and several machines. Publish the analysis.
 
-## Phase 6 — Attestation and submission (weeks 18–24)
+**What P5 can and cannot claim.** At 120 families and 4 seeds, the *overall* score carries roughly ±6% — a defensible headline. Individual *core category* scores carry roughly ±10.7%, enough to say "weak at lifetimes" but not to rank two adjacent categories. Say exactly that in the writeup. The earlier draft claimed defensible category numbers from 3 × 20 families, which would have been ±17–20%. It could not have supported them.
+
+**Exit:** a written report with real numbers and honest error bars.
+
+### P6 — Attestation and submission · 6 weeks · *parallel*
 
 - `bench-attest`: manifest, canonical CBOR, signing, redaction, canary screening
-- Challenge/batch protocol client (server may stub to `local` initially)
-- Consent flow, three separate consents
+- Challenge/batch protocol client
+- Three-way consent flow
 - Server: `/submit`, `/dump`, minimal leaderboard
-- T1 replay verification server-side
+- T1 replay verification (L0–L3 only)
 
-**Exit criterion:** an independent third party can download the dump and re-derive the leaderboard exactly.
+**Exit:** an independent third party downloads the dump and re-derives the leaderboard exactly.
 
-## Phase 7 — Scale the corpus (ongoing, months 6–18)
+### P7 — Corpus · 12–30 months · *the long pole*
 
-- Remaining synthetic categories, ~20 families each
+- Remaining core categories (2 × 40 = 80 families)
+- All probe categories (6 × 12 = 72 families)
 - Mining pipeline for `multi-file-repo` and `api-evolution`
-- L4 quality layer (mutation, criterion) where categories need it
+- Async oracle resolution (see **Q11**) before `async-concurrency` is authored
+- L4 quality layer where categories need it
 - Epoch rotation in production
 
-## Phase 8 — Maturity (months 12+)
+### P8 — Maturity · ongoing
 
-- `calibrate-suite`: empirical ICC, per-family IRT parameters
+- `calibrate-suite`: empirical per-family ICC and IRT parameters
 - Adaptive item allocation
 - T3 audit process and remedies document
 - Agentic track as a separate leaderboard
 
+---
+
+## Kill and pivot gates
+
+Numeric thresholds, decided in advance, so a bad result triggers a decision rather than being absorbed as slippage.
+
+| Gate | When | Threshold | If it fails |
+|---|---|---|---|
+| **G1** Windows sandbox | P1 week 1 | Network denial + memory limits demonstrably enforced | Windows runs at reduced trust tier, or requires WSL2, or is unsupported at launch. Decide then, not later — it affects a large share of the consumer audience |
+| **G2** ICC | End of P3.5 | ICC ≤ 0.5 | At ICC > 0.5, seeds are worth little and per-core-category CI floors near ±12%. **Pivot:** raise core categories to 60 families and cut to 4 core categories, or accept that only the overall score is rankable |
+| **G3** Authoring rate | End of P3 | A new contributor authors a validated family in ≤ 2 days | At > 3 days/family the corpus is a 3-year project. **Pivot:** cut to 3 core categories, or invest another 4 weeks purely in generation tooling before proceeding |
+| **G4** Mining yield | Before P7 mining work | ≥ 12 usable small-commit families per mined category | Rust-SWE-bench yielded ~0.6% from ~80k PRs, and we additionally restrict to small commits. **Pivot:** drop `multi-file-repo` to hand-written multi-file synthesis, losing realism but keeping the category |
+| **G5** Minimum viable hardware | End of P4 | `smoke` completes in < 90 min on 8 GB VRAM | The consumer-hardware promise is unmet. Shrink `smoke`, or raise the stated minimum and say so plainly |
+
+---
+
 ## What ships first, publicly
 
-Not a leaderboard. **A report.** Phase 5's output — three categories, several models, several machines, real confidence intervals, published methodology, published generators, published raw data.
+**Not a leaderboard. A report.** P5's output: three core categories, several models, several machines, real confidence intervals, published methodology, published generators, published raw data.
 
-A leaderboard launched before there is enough corpus to support category-level claims would be making claims the statistics cannot back, and would be very hard to walk back. The report establishes the method; the leaderboard follows once the corpus justifies it.
+A leaderboard launched before the corpus supports category-level claims would be making claims the statistics cannot back, and would be very hard to walk back. The report establishes the method; the leaderboard follows when the corpus justifies it.
 
 ## Sequencing rules
 
-1. **Schema decisions before code.** The submission manifest, `ExecClass`, `MemProfile`, and the IRT placeholder fields are cheap now and expensive later. See [12-schemas.md](12-schemas.md).
+1. **Schema decisions before code.** Submission manifest, `ExecClass`, `MemProfile`, per-category weights, and the IRT placeholder fields are cheap now and expensive later. See [12-schemas.md](12-schemas.md).
 2. **Sandbox before corpus.** A corpus built against a leaky sandbox has to be revalidated.
-3. **Resume before long suites.** Do not discover resume bugs in someone's 40-hour run.
-4. **Local runner before server.** The server is small and additive; the runner is the product.
-5. **Report before leaderboard.** Method credibility first.
+3. **ICC before corpus.** Sizing 272 families against an unmeasured constant is the largest avoidable risk in the plan.
+4. **Resume before long suites.** Do not discover resume bugs in someone's 40-hour run.
+5. **Local runner before server.** The server is small and additive; the runner is the product.
+6. **Report before leaderboard.** Method credibility first.

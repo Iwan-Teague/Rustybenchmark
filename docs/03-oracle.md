@@ -12,9 +12,17 @@ L4 quality    weight 0.1      mutation score, perf ratio, size ratio
 
 ```
 task_score = (apply_ok && compile_ok)
-           ? 0.7*behavior + 0.2*constraint + 0.1*quality
+           ? w_b*behavior + w_c*constraint + w_q*quality
            : 0.0
 ```
+
+**Weights are per-category, not global.** The defaults above (0.7 / 0.2 / 0.1) are wrong for
+several categories. In `borrow-lifetimes`, a solution that clones everything is *semantically
+correct* — it passes every behavioural property, and the entire signal lives in L3. Grading the
+project's flagship category on behaviour-dominant weights would score a clone-everything model
+almost identically to one that understands borrows. See the weight table in
+[04-categories.md](04-categories.md); weights are declared per category, overridable per family,
+and published on the leaderboard.
 
 The composite exists for sorting. **Always report the vector.** `compile_rate` alone is a headline-worthy number, and the error-code histogram is the diagnostic that tells a user *which part of Rust* a model is weak at.
 
@@ -90,7 +98,7 @@ fmt             = true
 unsafe_blocks   = { max = 0 }
 forbidden_calls = ["clone", "to_vec", "Rc::new", "RefCell"]
 required_traits = ["Iterator"]
-miri            = { enabled = false }          # true for the unsafe-ffi category
+miri            = { enabled = false }          # true for the unsafe-core category
 no_std          = false
 public_api      = "must_match_signature"       # exported signatures unchanged
 alloc_free      = false                        # optional: no heap allocation in hot path
@@ -98,9 +106,35 @@ alloc_free      = false                        # optional: no heap allocation in
 
 **All checks are AST-based via `syn`, never textual.** Grepping for `clone` is defeated by `<[T]>::to_vec` and false-positives on comments and string literals. The forbidden-call checker resolves method calls against the type where it can and falls back to path matching where it cannot; it records which mode it used so borderline results are auditable.
 
+### Allocation is measured, not blacklisted
+
+`forbidden_calls` cannot express "do not copy the data". Enumerating the ways to copy is hopeless:
+`clone`, `to_vec`, `to_owned`, `Vec::from(&s[..])`, `iter().copied().collect()`,
+`extend_from_slice`, `Box::new(x.as_ref().clone())`, and arbitrarily many more. A model that avoids
+the listed names while allocating freely would score as though it satisfied the constraint —
+false confidence, which is worse than no check.
+
+So the real constraint is enforced at runtime:
+
+```toml
+[constraint.allocation]
+enabled       = true
+max_allocs    = "reference"      # reference | <integer> | reference*<factor>
+max_bytes     = "reference*1.25"
+```
+
+The grading harness installs a counting `#[global_allocator]` and asserts an allocation budget
+derived from the reference implementation's own measured behaviour. This measures the actual
+property rather than a proxy for it, and it cannot be evaded by choosing a different API.
+
+`forbidden_calls` is retained only where the constraint genuinely *is* about a specific API —
+"solve this without `RefCell`", "no `unsafe`" — not as an allocation proxy.
+
 **Emits:** `constraint_score: f32`, `violations: Vec<String>` with file:line — e.g. `"forbidden: clone @ src/lib.rs:41"`.
 
-`miri` is mandatory for the `unsafe-ffi` category and off elsewhere (it is slow). When on, a miri UB report is a hard behavior failure, not a constraint deduction — undefined behaviour is not a style issue.
+`miri` is mandatory for the `unsafe-core` category and off elsewhere (it is slow). When on, a miri UB report is a hard behavior failure, not a constraint deduction — undefined behaviour is not a style issue.
+
+**Miri cannot run FFI.** It does not execute foreign function calls, which is the defining feature of the code `ffi-boundary` tests. That contradiction is why the original `unsafe-ffi` category was split: `unsafe-core` (raw pointers, transmute, aliasing, `Send`/`Sync`) is miri-checkable and became a core category; `ffi-boundary` (`repr(C)`, C interop, ABI correctness) is graded against a **real C shim linked at test time**, with no miri, and became a probe category.
 
 ## L4 — Quality (weight 0.1)
 
@@ -115,7 +149,18 @@ size     = { max_ratio_vs_reference = 3.0, weight = 0.2 }
 - **Perf ratio** is the primary oracle for `perf-optimization`. Criterion against the reference implementation, ratio capped at `max_ratio`.
 - **Size ratio** penalises LoC bloat relative to the reference.
 
-L4 is expensive. **Off by default**; enabled with `--quality`. Required for the `deep` and `full` suites, optional for `standard`, unavailable in `smoke`.
+L4 is expensive. **Off by default**; enabled with `--quality`. Required for `deep`, optional for `standard`, unavailable in `smoke`. It adds roughly 40 s per instance, which is why it appears explicitly in the timing model in [07-statistics.md](07-statistics.md).
+
+### L4 is not replay-verifiable
+
+Criterion timings are hardware-dependent by design and cargo-mutants is not deterministic. A server
+re-grading a submission will not reproduce L4 numbers, and pretending otherwise would either reject
+honest submissions or force the verifier to tolerate mismatches — which reopens the fabrication hole
+that T1 replay exists to close.
+
+Therefore: **T1 replay verifies L0–L3 exactly and treats L4 as unverifiable**, subject to
+plausibility bounds only. L4's contribution to a score is labelled at T0 confidence even inside a
+T2 row. This is a stated tier caveat, not a hidden one. See [10-integrity.md](10-integrity.md).
 
 ### Perf measurement caveat
 
