@@ -31,7 +31,16 @@ Client computes scores, signs with an embedded key, uploads. Verifies nothing. G
 
 ### T1 — Replayed
 
-Client uploads the model's raw output artifacts alongside the scores. The server re-materialises each instance from its seed, runs the identical oracle in its own sandbox, and compares. Any mismatch → rejected and flagged.
+Client uploads the model's raw output artifacts alongside the scores. The server re-materialises each
+instance from its seed, **runs the identical oracle over the submitted output** in its own sandbox,
+and compares scores. Any mismatch → rejected and flagged.
+
+> **Replay never regenerates the model output, and cannot.** Greedy generation is not reproducible
+> across execution classes: the same model, quant, seed and sampling gave **7/7 byte-different**
+> completions at `-ngl 0` versus `-ngl 99`, and KV-cache quantisation changed output on 4/7. A grader
+> on different hardware would fail to reproduce honest submissions. Replay verifies *"this output
+> scores what you claimed"*, never *"this output is what the model would emit"*. The natural reading
+> of the old wording was the second, and it is unimplementable.
 
 **This eliminates fabrication of L0–L3 scores entirely.** It costs the server CPU and nothing else. It is the single highest-leverage control in the system.
 

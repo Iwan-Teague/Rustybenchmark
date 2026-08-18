@@ -90,7 +90,28 @@ Cold builds dominate wall-clock and would make the benchmark measure the user's 
 
 ## Determinism controls
 
-Grading is fully reproducible: seed → instance → proptest seed → verdict. Generation is not — greedy decoding in llama.cpp still varies with batch size and backend build.
+Grading is fully reproducible: seed → instance → proptest seed → verdict. Generation is not — but the
+reason is **not** the one this document previously gave.
+
+**Corrected:** *"greedy decoding in llama.cpp still varies with batch size"* is false as stated.
+Measured on llama.cpp b10470 (Metal, Qwen2.5-3B, temp 0, seed 42): prefill chunk size `-b`/`-ub`
+across 64/128/256/512/2048 produced **bit-identical** output on 7/7 prompts, as did `cache_prompt`
+true vs false and ten sequential identical requests.
+
+**The real hazard is serving concurrency, and llama.cpp now defaults to 4 slots.** With 8 slots and
+an identical prompt to each, llama.cpp yields 5–8 unique completions; a single slot is always
+identical. A freshly launched `llama-server` with no `-np` flag reports `total_slots: 4`.
+
+> **The harness MUST pin concurrency to 1** (`--parallel 1` / `-np 1`) **and verify it via `/slots`
+> during preflight.** A harness that issues concurrent requests silently enters the non-deterministic
+> regime and destroys replay verification. This is a preflight gate, not a recommendation.
+
+**vLLM is measurably not batch-invariant at temperature 0** with default kernels: 1000 completions of
+one prompt produced **80 distinct results**, first divergence at token 103. Batch-invariant kernels
+make all 1000 identical at ~1.6× the latency. So the "flag any nondeterministic repeat" rule below
+would fire on essentially every vLLM run and burn the alarm budget [REVIEW-5.md](REVIEW-5.md) R5-S5
+already identified. Batch-invariance is therefore a **per-backend property recorded as a field**, and
+a ranked vLLM row requires batch-invariant kernels.
 
 Therefore:
 
@@ -106,6 +127,17 @@ Therefore:
 | `single-shot` | 1 | Cheapest; cleanest measurement of raw capability |
 | `repair` | 2 | Attempt 2 sees diagnostics only, never oracle source. **Default.** |
 | `agentic` | n | Model drives tools (read/write/run). Separate reported track — the scaffolding confounds the model measurement, and cost multiplies |
+
+**The `tools` key is omitted from the request body entirely.** Not sent empty, not sent with
+`tool_choice: "none"`. Measured: merely *offering* three plausible coding tools flipped 3/3 non-trivial
+Rust tasks from a fenced code block to a `finish_reason: tool_calls` response with **empty content** —
+which the oracle scores as zero. Sixteen wholly irrelevant tools did the same. And `tool_choice: "none"`
+is **not** a control condition: the schemas are still rendered into the prompt (`prompt_tokens`
+identical at 323), and the model emits an unparseable raw `<tool_call>` blob in the content field. The
+server's own chat template branches on `{%- if tools %}`, i.e. on *presence*, not on `tool_choice`.
+
+`tools_offered: false` is recorded as an attested field in the run identity, because a run where tools
+leaked in is not comparable to one where they did not, and the failure mode is silent.
 
 `repair` is default because it mirrors real use and because Aider's benchmark established the protocol (two attempts, test output fed back) — comparability is worth something.
 

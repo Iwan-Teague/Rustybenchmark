@@ -48,7 +48,26 @@ pub struct MemProfile {
 - **`GpuFull` is the default view.** Cleanest, most comparable, the primary table.
 - **`Hybrid` and `CpuOnly` are collected, tagged, and shown behind a toggle.** Never merged into the same ranking.
 - **Timing-derived metrics are comparable only within a class.** `throughput_score`, `time_to_first_pass`, `efficiency_score` — all class-scoped.
-- **`capability_score_core5` is comparable across all classes.** Correctness does not care where the layers ran — but `perf-optimization` is gated to `GpuFull`, so the full eleven-category `capability_score` is *not* cross-class comparable ([REVIEW-5.md](REVIEW-5.md) `capability-score-denominator`).
+- **`capability_score` is NOT comparable across execution classes.** This document previously
+  asserted the opposite — *"correctness does not care where the layers ran"* — and that is
+  **empirically false**, measured directly:
+
+  | Measurement | Result |
+  |---|---|
+  | Greedy output at `-ngl 0` vs `-ngl 99`, 7 Rust prompts, temp 0, fixed seed | **7/7 byte-different** |
+  | Top-1 token agreement vs full offload | `-ngl 18`: 97.8% · `-ngl 0`: **94.4%** |
+  | Oracle-verdict flip | On an unsafe-transmute task the GPU answer compiled; the CPU answer returned a `&[u8]` slice as `&[u32]` — **a type error** |
+
+  At a 2–6% per-token flip probability, any generation beyond ~30 tokens diverges with near
+  certainty, and Rust solutions run 400–1500 tokens. Two submitters with the same model, quant, seed
+  and sampling **will not produce the same code** if one has 24 GB and the other 12 GB. This is a
+  pass/fail difference, not a stylistic one.
+
+  **Therefore `exec_class` is part of the row identity, exactly like quantisation** — not a hardware
+  tag attached to an otherwise-comparable score. Cross-class comparison of `capability_score` is
+  withdrawn; rows carry their class and are compared within it. (`perf-optimization` remains
+  additionally gated to `GpuFull`, so the denominator rule in [04](04-categories.md) still applies on
+  top of this.)
 
 That last point is worth stating on the leaderboard itself: a `CpuOnly` row with the same `capability_score` as a `GpuFull` row is making the same claim about the model and a very different claim about the machine.
 
@@ -79,9 +98,26 @@ ctx               context window actually configured
 ngl               layers offloaded
 batch / ubatch
 flash_attn        on | off
-kv_cache_type     f16 | q8_0 | q4_0
+kv_cache_type     f16 | q8_0 | q4_0   <- PINNED to f16 for a ranked row, not merely recorded
 threads
 rope / yarn settings if non-default
 ```
 
 Quantisation especially: comparing a Q4_K_M row to a Q8_0 row of the "same model" as though they were the same thing is one of the most common errors in local-model discourse, and the leaderboard should make it impossible to do by accident.
+
+**`kv_cache_type` is promoted from recorded to pinned.** Measured: `-ctk q8_0 -ctv q8_0` versus `f16`
+gave byte-different greedy output on **4 of 7** prompts, with divergence appearing as early as the
+first line of generated code. It is a capability knob wearing a memory-optimisation label, and a
+ranked row must pin it to `f16`.
+
+**`flash_attn` stays free.** Measured output-preserving to within noise — 99.87% top-1 agreement,
+perplexity ratio 1.00013, an order of magnitude tighter than any other knob tested. Record it only
+because llama.cpp requires it to quantise the V cache, so turning it off silently forces V back to
+`f16` and changes the memory accounting above.
+
+**Rope/YaRN scaling is capability-affecting and must be pinned.** Configuring a context *beyond* the
+model's native window costs real quality even on short prompts: YaRN at 4× gave +1.93% perplexity and
+**91.95%** top-1 agreement, and *linear* rope scaling at 2× was catastrophic — +211% perplexity,
+**58.5%** top-1 agreement. By contrast, changing `-c` **within** the native context produced
+**bit-identical** greedy completions, so configured context size alone is genuinely free. Two
+different rules that the old "(rope / yarn settings if non-default)" parenthetical collapsed into one.

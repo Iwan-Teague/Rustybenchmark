@@ -140,3 +140,28 @@ The harness refuses to start, or warns loudly, when:
 | Cold/warm calibration delta >15% | warn; mark throughput metrics unstable |
 | Model context window smaller than the largest family's prompt | refuse that family, record as `skipped_context` |
 | Network reachable from inside the sandbox | refuse — the sandbox is broken |
+| **Serving concurrency > 1** (`/slots` reports `total_slots` > 1, or `-np` unset on llama.cpp) | **refuse.** The default is now 4 slots, and concurrent decoding yields 5–8 distinct completions for one prompt. Non-negotiable for a ranked row |
+| **Effective context unknown or below the suite's largest prompt** | **refuse.** See the context probe below |
+| Backend batch-invariance unverified (vLLM without batch-invariant kernels) | warn; ineligible for ranking |
+| `tools` key present in the request path | refuse — the control condition requires its absence |
+
+### The context probe — the highest-impact hidden variable
+
+Context length is the **single largest measured effect in the whole design space**: same weights, same
+backend, Aider measured **71.4% at 8k context versus 51.9% at 2k — a 19.5 point swing**, with
+well-formed-response rate collapsing from 90.2% to 46.2%. That is larger than the quantisation effect,
+larger than the edit-format effect, and larger than every backend and precision effect combined.
+
+It is also **invisible over the OpenAI-compatible API**, and backends fail differently:
+
+- **llama.cpp fails loudly** — HTTP 400 with the exact window in the body:
+  `{"type":"exceed_context_size_error","n_prompt_tokens":5583,"n_ctx":4096}` (measured).
+- **Ollama truncates silently**, discarding the oldest messages with no error.
+
+A silently truncated prompt is scored as a model failure caused by configuration — noise attributed to
+the wrong cause, in the direction that makes weak configurations look like weak models.
+
+So preflight **binary-searches the effective context**: send prompts of increasing length until the
+server either errors or stops tracking the input (detectable because `usage.prompt_tokens` ceases to
+match what was sent). Costs a handful of requests, needs no vendor extension, and works on the silent
+backends too. The result is recorded, and it also classifies the backend as loud-fail or silent-truncate.
