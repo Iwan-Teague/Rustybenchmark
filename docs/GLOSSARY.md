@@ -10,7 +10,7 @@ Terms used precisely throughout these documents. Where a word has a loose everyd
 
 **Capability score** — weighted mean task score across categories. A property of the model. Comparable across machines and execution classes.
 
-**Category** — one of ten Rust skill areas, scored independently. See [04-categories.md](04-categories.md).
+**Category** — one of **eleven** Rust skill areas, scored independently, split into five **core** (40 families, rankable) and six **probe** (12 families, directional only). See [04-categories.md](04-categories.md).
 
 **Design effect** — `1 + (seeds_per_family − 1) × ICC`. The factor by which clustering inflates variance, and therefore the divisor turning raw instance count into effective N.
 
@@ -22,11 +22,17 @@ Terms used precisely throughout these documents. Where a word has a loose everyd
 
 **Execution class** — `GpuFull` (100% offload), `Hybrid` (partial), or `CpuOnly`. Derived from the backend's reported layer split, never self-declared.
 
-**Family** — a task generator: a named function from seed to instance. The unit that matters for statistical power. ~200 planned.
+**Family** — a task generator: a named function from seed to instance. The unit that matters for statistical power. **272 planned** — 248 synthetic, 24 mined.
 
 **Frozen** — a task kind with no generation. Development and smoke use only; refused by scored suites.
 
-**ICC (intra-class correlation)** — how correlated outcomes are among seeds of the same family. Estimated at 0.3–0.5; measured empirically once data exists.
+**ICC (intra-class correlation)** — how correlated outcomes are among seeds of the same family. Estimated at 0.3–0.5 and **published per category, not pooled** (R4-S5): categories whose families cluster into few distinct *shapes* carry a higher effective ICC than the corpus-wide figure.
+
+**Core category** — one of the five categories budgeted at 40 families and precise enough to rank.
+
+**Probe category** — one of the six budgeted at 12 families. Contributes to the composite; its own score is directional and is never sorted on.
+
+**Shape** — a distinct task archetype within a category. Families cluster into shapes, which makes clustering two-level (shape → family → seed) and sets the real precision ceiling (R5-S3).
 
 **Instance** — one concrete problem produced by a family from one seed: prompt, files, hidden oracle, facts, canary.
 

@@ -85,7 +85,7 @@ Cold builds dominate wall-clock and would make the benchmark measure the user's 
 - **Pre-vendored `.crate` files** shipped with the suite; `--offline --locked` always.
 - **Prebuilt dependency workspace** per suite: dependencies compiled once during preflight, `target/` reused by every unit via a shared target directory.
 - **`sccache`** where available.
-- Record `build_ms` separately from `gen_ms` in every journal line, and publish `build_overhead_ratio`. If it exceeds ~0.3 the caching setup is broken and timing metrics are suspect.
+- Record `build_ms` and `grade_ms` separately from `prefill_ms`/`gen_ms` in every journal line, and publish `harness_overhead_ratio = (build_ms + grade_ms) / (prefill_ms + gen_ms + build_ms + grade_ms)`. A healthy `deep` unit sits near **0.50** at 20 tok/s and ~0.75 at 60 tok/s, because L4 grading is fixed cost — the old flat 0.3 gate would have fired on every healthy deep run ([REVIEW-5.md](REVIEW-5.md)).
 - **Exclude the first N units of each segment from timing aggregates** (cache warmth); record `segment_position` on every unit so this is auditable rather than magic.
 
 ## Determinism controls

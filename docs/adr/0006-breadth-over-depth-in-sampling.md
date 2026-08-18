@@ -41,7 +41,7 @@ Supporting decisions:
 - **Paired design.** All models in an epoch run the identical seed set; comparison uses McNemar on discordant pairs. Typically 2–4× further power gain for one line of policy.
 - **Greedy primary, sampled probe.** `temp = 0.0`, one sample per instance for the primary score; a 10% subsample × 5 samples at `temp = 0.8` for the variance estimate. Greedy repeats mostly re-measure backend nondeterminism, which is worth detecting but not worth 5× the budget.
 - **Cluster-bootstrap CIs at the family level.** Naive per-instance bootstrap understates the CI by roughly 40% at ICC = 0.3.
-- **`deep` is the minimum tier for a ranked leaderboard row.** At `standard`, per-category CIs are around ±17 points — too wide for any category-level claim.
+- **`deep` is the minimum tier for a ranked leaderboard row.** At `standard`, per-core-category CIs are **±12.5%** and per-probe-category **±22.8%** — too wide for any category-level claim. (An earlier "around ±17 points" here was a third value for the same quantity; see [REVIEW-5.md](../REVIEW-5.md) `standard-row-ci`.)
 
 ## Consequences
 

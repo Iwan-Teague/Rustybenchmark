@@ -164,10 +164,16 @@ Every field carries `source`, so a value from `wgpu` fallback is distinguishable
   "completeness": 1.0,
   "tier": { "suite": "deep", "trust": "T2" },
   "flags": ["throughput_stable"],
-  "capability_score":      { "value": 0.412, "ci95": [0.373, 0.451], "effective_n": 632 },
-  "capability_score_lite": { "value": 0.437, "ci95": [0.396, 0.478], "effective_n": 571 },
+  "categories_scored": ["borrow-lifetimes","traits-generics","error-handling","idiom-refactor",
+                        "unsafe-core","async-concurrency","api-evolution","test-authoring",
+                        "cross-module","ffi-boundary"],
+  "capability_score":       { "value": 0.412, "ci95": [0.363, 0.461], "effective_n_equal_weight": 408,
+                              "effective_n_pooled": 573 },
+  "capability_score_synth": { "value": 0.437, "ci95": [0.386, 0.488], "effective_n_equal_weight": 355 },
+  "capability_score_core5": { "value": 0.401, "ci95": [0.352, 0.450], "effective_n_equal_weight": 421 },
   "categories": {
-    "borrow-lifetimes": { "value": 0.31, "ci95": [0.19, 0.44], "n": 150, "effective_n": 79 }
+    "borrow-lifetimes": { "value": 0.31, "ci95": [0.20, 0.42], "n": 160, "effective_n": 84,
+                          "shapes": 11, "icc_within_family": 0.31, "icc_within_shape": null }
   },
   "throughput_score": { "value": 21.4, "unit": "units_passed_per_hour",
                         "exec_class": "GpuFull", "stability": "stable" },
@@ -177,11 +183,12 @@ Every field carries `source`, so a value from `wgpu` fallback is distinguishable
   "error_histogram": { "E0499": 41, "E0308": 96, "E0277": 133 },
   "compile_rate": 0.61,
   "classified_rate": { "borrow-lifetimes": 0.88, "idiom-refactor": 0.94 },
-  "build_overhead_ratio": 0.14,
+  "harness_overhead_ratio": 0.50,
+  "l4_share_of_grade": 0.62,
   "icc_measured": { "borrow-lifetimes": 0.31, "unsafe-core": 0.52 },
-  "failure_classes": { "borrowck": 88, "trait": 133, "type": 96, "logic": 210, "timeout": 4 },
+  "failure_classes": { "borrowck": 88, "trait": 133, "type": 96, "logic": 210, "constraint": 41 },
   "segments": 4,
-  "icc_estimates": { "borrow-lifetimes": 0.34 }
+  "_note": "icc_estimates was a duplicate of icc_measured and is removed -- R4-S5 requires the\n            measured per-category value, so there is only one field for it."
 }
 ```
 

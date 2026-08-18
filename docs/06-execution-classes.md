@@ -48,7 +48,7 @@ pub struct MemProfile {
 - **`GpuFull` is the default view.** Cleanest, most comparable, the primary table.
 - **`Hybrid` and `CpuOnly` are collected, tagged, and shown behind a toggle.** Never merged into the same ranking.
 - **Timing-derived metrics are comparable only within a class.** `throughput_score`, `time_to_first_pass`, `efficiency_score` — all class-scoped.
-- **`capability_score` is comparable across all classes.** Correctness does not care where the layers ran.
+- **`capability_score_core5` is comparable across all classes.** Correctness does not care where the layers ran — but `perf-optimization` is gated to `GpuFull`, so the full eleven-category `capability_score` is *not* cross-class comparable ([REVIEW-5.md](REVIEW-5.md) `capability-score-denominator`).
 
 That last point is worth stating on the leaderboard itself: a `CpuOnly` row with the same `capability_score` as a `GpuFull` row is making the same claim about the model and a very different claim about the machine.
 

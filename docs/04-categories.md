@@ -36,7 +36,10 @@ Both contribute to `capability_score`. Only core categories may be compared agai
 
 **72 families.** Split from the original category 4: miri can check `unsafe-core` but cannot execute FFI, which is what `ffi-boundary` is definitionally about.
 
-**Corpus total: 272 families.** ~236 synthetic, ~36 mined.
+**Corpus total: 272 families — 248 synthetic, 24 mined.** (5 core × 40 = 200 synthetic, plus 4
+synthetic probe categories × 12 = 48; the two mined probe categories are `api-evolution` and
+`cross-module`, 12 each. An earlier "~236 / ~36" split survived four review rounds because the
+total was right — [REVIEW-5.md](REVIEW-5.md) W11.)
 
 ## Why these eleven
 
@@ -68,8 +71,20 @@ Real Rust fix patches average **9.8 files and 139.9 lines** (Python SWE-bench Ve
 Cost is managed rather than avoided:
 
 - **Probe class (12 families), equal category weight.** Its own score is directional only, but it still contributes to the composite.
-- **Bounded repos.** 3–10 files, ≤2k LoC, pre-vendored dependencies, prebuilt dependency workspace. Mining targets *small* fail-to-pass commits specifically; they exist in quantity.
-- **Separate reporting axis.** Both `capability_score` (all eleven) and `capability_score_lite` (the other ten) are published side by side. A slow machine can run lite and still appear, with the omission explicit rather than silently biasing the table.
+- **Bounded scope.** 3–10 files, **≤5k LoC**, pre-vendored dependencies, prebuilt dependency
+  workspace. Mining targets small fail-to-pass commits in **workspace member crates**, not whole
+  repositories — matching [ADR-0004](adr/0004-cross-module-in-headline.md) and roadmap gate G4.
+  The ≤2k figure here was R2-S5's superseded value and is corrected
+  ([REVIEW-5.md](REVIEW-5.md) W7).
+
+  **The cap is load-bearing on both sides and 5k is not free.** Measured on 3,000 real `.rs` files,
+  non-blank Rust runs ~39.5 chars/line ≈ 10.4–12.3 tokens per LoC, so 5k LoC is **52k–62k tokens of
+  source alone** — beyond a 32k context, and an order of magnitude above the flat "2k-token prompt"
+  the timing model in [07](07-statistics.md) prices every unit at. R2-S4's construct-validity
+  argument (that at ≤2k LoC the whole repo fits in the prompt, so the category tests coordination
+  rather than navigation) assumed the smaller cap and **needs re-deriving at 5k**. Tracked in
+  **Q12** and **Q25**.
+- **Separate reporting axis.** `capability_score`, `capability_score_synth` (nine synthetic categories) and `capability_score_core5` are published side by side. A slow machine can run lite and still appear, with the omission explicit rather than silently biasing the table.
 - **Time-boxed, not turn-boxed.** Wall-clock cap per task; timeout vs genuine failure is recorded separately, because on this benchmark the distinction is a *hardware* fact and separating it is the point.
 
 ## Tiers within a category
@@ -97,11 +112,33 @@ Once there are enough submissions, subcategory scores become the mechanism for r
 Default composite: **equal weight per category.** Not per family — otherwise a 40-family category would silently outweigh a 12-family one.
 
 ```
-capability_score      = mean over all 11 categories of (mean task_score within category)
-capability_score_lite = mean over the 10 categories excluding `cross-module`
+capability_score       = mean over the categories ACTUALLY EXECUTED (see denominator rule below)
+capability_score_synth = mean over the 9 synthetic categories        <- ADR-0002's promised number
+capability_score_core5 = mean over the 5 core categories             <- always-comparable baseline
 ```
 
 Probe categories are noisier individually but contribute acceptably to an 11-way mean. Alternative weightings (usage-frequency, difficulty) are published as secondary columns once there is data to justify them, never as the default.
+
+**`capability_score_synth` exists because ADR-0002 promised it and the design never delivered it.**
+ADR-0002 resolves "which number is real?" by making the headline explicitly the synthetic-suite
+figure with `wild` beside it as a labelled realism check. But the composite spans all eleven
+categories, two of which are mined, and the old `_lite` excluded only `cross-module` — so
+`api-evolution` sat inside every published figure, with no decision record, carrying the weaker
+inherited oracle (30–32% of unit-test-passing solutions only partially correct, 18–23% outright
+wrong). See [REVIEW-5.md](REVIEW-5.md) W4.
+
+**The denominator is part of the score's identity.** `perf-optimization` is skipped on non-`GpuFull`
+machines, on battery, or when the timing precheck fails (`perf_unavailable`); families can be skipped
+for context (`skipped_context`). A mean over eleven categories where one is empty is a different
+statistic. So:
+
+- every published `capability_score` carries `categories_scored: [...]`, and the leaderboard renders
+  a missing category the way it renders `completeness < 1.0`;
+- **`capability_score_core5` is the cross-machine comparison key**, because those five categories are
+  never machine-gated and therefore always share a denominator.
+
+This corrects three documents that called `capability_score` comparable across machines without
+qualification — see [REVIEW-5.md](REVIEW-5.md) `capability-score-denominator`.
 
 ## `error-handling` tests plumbing, not error design
 

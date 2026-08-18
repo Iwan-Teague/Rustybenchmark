@@ -222,13 +222,29 @@ Every one of these is a hard gate. A family that fails any of them does not ship
 
 Seeds are never author-chosen for scored runs.
 
+**There are two derivations, not one**, because a single formula cannot serve both pairing and
+freshness. [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md) is authoritative:
+
 ```
-seed(task_id) = blake3(challenge_nonce || epoch || task_id || seed_index)[..8] as u64
+scored core  (~85%)  seed = blake3(epoch_seed  || task_id || i)[..8]   fixed per epoch, frozen in the plan
+fresh probe  (~15%)  seed = blake3(batch_nonce || task_id || i)[..8]   per batch, slot-shaped, never scored
 ```
 
-- `challenge_nonce` is issued by the server (see [10-integrity.md](10-integrity.md)). It did not exist before the run was requested, so precomputed answers cannot apply.
-- `epoch` rotates (monthly). A fixed per-epoch seed set is used for **all** models in that epoch, which enables paired statistical comparison — see [07-statistics.md](07-statistics.md).
-- Local/offline runs use `challenge_nonce = "local"` and are trust tier T0.
+- The **core** set is identical for every submitter in an epoch, which is what makes paired comparison
+  — and therefore the affordable suite sizes in [07-statistics.md](07-statistics.md) — possible.
+- The **probe** set uses a per-batch nonce that did not exist before the request. It is a detector,
+  not a score.
+- Local/offline runs derive both locally and are trust tier T0.
+
+> This section previously carried a single-nonce formula and asserted, in consecutive bullets, both
+> that seeds "did not exist before the run was requested" and that "a fixed per-epoch seed set is used
+> for all models". Those cannot both hold — that is exactly the contradiction ADR-0009 was written to
+> resolve, restated verbatim in the document that was supposed to have been fixed
+> ([REVIEW-5.md](REVIEW-5.md) `stale-seed-derivation`).
+>
+> Note also that neither derivation currently delivers what it claims: see
+> [REVIEW-5.md](REVIEW-5.md) R5-S2 — `epoch_seed` is written to the submitter's disk before the first
+> unit runs, so core seeds are not secret from the party holding them.
 
 ## `kind = "mined"`
 

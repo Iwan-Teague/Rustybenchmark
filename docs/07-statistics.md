@@ -63,6 +63,32 @@ That second number is why pairing matters.
 > variable bounded on [0, 1] is at most 0.25, so these CIs are never too narrow. The reported
 > CI is always the cluster bootstrap, not this formula; the table exists for sizing decisions.
 
+## Clustering is two-level: shape → family → seed
+
+The model above is one-level (family → seed) and **understates variance whenever families cluster
+into a smaller number of task shapes**, which round 4 established they do: `unsafe-core`'s 40 families
+span only ~16 miri-checkable shapes, and `idiom-refactor`'s usable transform catalogue measured at
+5 of 35 candidates and ~3 distinct lessons ([REVIEW-5.md](REVIEW-5.md) R5-S3).
+
+Two consequences, both load-bearing:
+
+1. **The precision ceiling is governed by SHAPE count, not family count.** Buying more families
+   inside an exhausted shape space buys almost nothing. Below roughly 13 shapes, the ±10.7% target is
+   unreachable at *any* family budget, so **no core category currently reaches the figure
+   [ADR-0008](adr/0008-core-and-probe-categories.md) claims**. The budgets in that ADR are marked
+   provisional pending a shape-count audit per category (**Q24**).
+2. **The specified family-level cluster bootstrap under-covers**, and the within-family ICC that
+   Phase 3.5 was designed to measure is **invariant to the defect** — it cannot detect shape
+   clustering at all. Gate G2 as written measures the wrong quantity.
+
+So: the bootstrap resamples **shapes**, carrying their families and seeds; `report.json` records
+`shapes`, `icc_within_family` and `icc_within_shape` per category; and Phase 3.5 must estimate the
+shape component, not only the family one.
+
+`idiom-refactor` is a special case: its clustering is **crossed, not nested** — a transform appears
+across many families rather than partitioning them — so **no nested bootstrap is valid for it**. It
+needs a different estimator or a different category design, and that is unresolved (**Q24**).
+
 ## The ceiling that seeds cannot raise
 
 As seeds per family → ∞, the design effect grows linearly, so effective N per category converges:
@@ -125,19 +151,66 @@ Corpus: **272 families** — 5 core × 40, 6 probe × 12. See [04-categories.md]
 | Suite | Families | Seeds | Scored units | + probe | Mode | Eff. N | ±CI overall | ±CI core cat | ±CI probe cat | @20 tok/s | @60 tok/s |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `smoke` | 60 | 1 | 60 | — | single-shot | 60 | ±12.7% | n/a | n/a | ~55 min | ~25 min |
-| `standard` | 272 | 2 | 544 | +82 | repair | ~418 | ±4.8% | ±15.1% | ±27.6% | ~15.3 h | ~7.0 h |
-| `deep` | 272 | 4 | 1088 | +163 | repair + L4 | ~573 | ±4.1% | **±10.7%** | ±19.6% | ~44.5 h | ~20.2 h |
+| `standard` | **208** | 2 | **416** | +62 | repair | ~320 | **±6.5%** | ±12.5% | ±22.8% | **~11.7 h** | **~6.0 h** |
+| `deep` | 272 | 4 | 1088 | +163 | repair + L4 | ~573 | ±4.9% | **±10.7%** | ±19.5% | ~44.5 h | **~29.7 h** |
 
-All figures at ICC = 0.3. Precision columns are computed on scored units only; wall-clock columns include the probe. `smoke` carries no probe — it is not submittable for ranking, so precomputation detection is moot. See the sensitivity grid below.
+All figures at ICC = 0.3. Precision columns are computed on scored units only; wall-clock columns
+include the probe. `smoke` carries no probe — it is not submittable for ranking, so precomputation
+detection is moot. See the sensitivity grid below.
+
+Three columns were corrected after round 5 ([REVIEW-5.md](REVIEW-5.md)); the reasoning is worth
+keeping visible because two of the errors were of the same class as R1-S1.
+
+**The `standard` row no longer claims the full corpus.** [04](04-categories.md) marks expensive
+families (miri, criterion, multi-file) as `tier = deep`, "admitted only above the `standard` suite" —
+and miri is *mandatory* for `unsafe-core`. So 64 families (all 40 of `unsafe-core`, plus 12
+`perf-optimization` and 12 `cross-module`) are deep-tier, and `standard` runs **208 families across
+8 categories**, not 272 across 11. The old row sized `standard` as the whole corpus and then quoted a
+`±CI core cat` figure for a category that, by 04's own tier rule, had no families in that suite.
+
+This is why the denominator rule in [04](04-categories.md) matters: **`standard` and `deep` do not
+compute `capability_score` over the same category set**, so their headline numbers are not directly
+comparable and each must publish `categories_scored`. `capability_score_core5` is undefined at
+`standard` (only four core categories run), which is a further reason `deep` is the minimum ranked
+tier.
+
+**`±CI overall` uses the right estimator now.** `capability_score` is defined as an *equal-weight mean
+of eleven category means* ([04](04-categories.md)), not a pooled mean of 1088 units. Under equal
+weighting each 48-unit probe category carries the same 1/11 weight as each 160-unit core category, so
+the variance is dominated by the six small strata:
+
+```
+Var = (1/121) · Σ_c Var_c          Var_c = 0.25 / eff_N_c
+deep:      ±4.9%   (equal-weight effective N 408, not the pooled 573)
+standard:  ±5.7%   (equal-weight effective N 298)
+lite (10 categories): ±5.0% deep, ±5.8% standard
+```
+
+The pooled effective N is still published in the `Eff. N` column because it is the right number for
+*unit-level* questions; it is the wrong number for the headline score, and the two are now labelled.
+
+**`±CI core cat` / `±CI probe cat` on the `standard` row** previously used the `deep` suite's design
+effect (1.90, for 4 seeds) inside a 2-seed row. At the correct DE = 1.30 they are ±12.5% and ±22.8%.
+
+**`@60 tok/s` on the `deep` row** treated the whole per-unit cost as token-bound. It is not:
+
+```
+per-unit @20 tok/s = 64 s token-bound + 64 s fixed (build+grade ×2 attempts, L4 once) = 128 s
+per-unit @60 tok/s = 21 s token-bound + 64 s fixed                                    =  85 s
+```
+
+So `deep` is ~29.7 h at 60 tok/s, not 20.2 h. **The L4 share of per-unit cost rises from 31% at
+20 tok/s to 47% at 60 tok/s** — on fast hardware `deep` is progressively grading-bound rather than
+inference-bound, which is a result worth publishing and which a single throughput multiplier hid.
 
 ### ICC sensitivity
 
 ICC is an **assumption, not a measurement** (see [REVIEW.md](REVIEW.md) S2). Overall effective N and
 ±CI for `deep` (272 × 4 = 1088 instances) across plausible values:
 
-| ICC | Design effect | Eff. N | ±CI overall | ±CI core cat |
+| ICC | Design effect | Eff. N (pooled) | ±CI overall (pooled — see above) | ±CI core cat |
 |---|---|---|---|---|
-| 0.2 | 1.6 | 680 | ±3.8% | ±9.6% |
+| 0.2 | 1.6 | 680 | ±3.8% | ±9.8% |
 | 0.3 | 1.9 | 573 | ±4.1% | ±10.7% |
 | 0.5 | 2.5 | 435 | ±4.7% | ±12.3% |
 | 0.7 | 3.1 | 351 | ±5.2% | ±13.7% |
@@ -154,8 +227,8 @@ has the same problem, so the estimate belongs per category. See [REVIEW-4.md](RE
 ### There is no `full` suite
 
 An earlier draft specified `full` at 16 seeds. It was deleted. Going 4 → 16 seeds improves
-per-core-category CI from ±10.7% to roughly ±9% for **4× the wall clock** — over 110 hours at
-20 tok/s. The S3 ceiling means the money is in families, never in seeds.
+per-core-category CI from ±10.7% to roughly ±9% for **4× the wall clock** — **178 hours** at
+20 tok/s. (An earlier draft said "over 110 hours" in the same sentence as "4×"; 4 × 44.5 = 178.) The S3 ceiling means the money is in families, never in seeds.
 
 If someone wants more precision than `deep`, the answer is more families, not more seeds.
 

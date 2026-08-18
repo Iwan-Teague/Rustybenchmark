@@ -24,7 +24,7 @@ Cost is managed by:
 
 - **Fewer families (15 vs 20–25), equal category weight.** Depth traded, not the category.
 - **Bounded scope**: 3–10 files, ≤5k LoC, pre-vendored dependencies, prebuilt dependency workspace. Mining targets small fail-to-pass commits in **workspace member crates**, not whole repositories.
-- **A second published figure**: `capability_score_lite` excludes this category. A slow machine can run lite and still appear on the leaderboard.
+- **A second published figure**: `capability_score_synth` excludes this category (and `api-evolution`, the other mined one). A slow machine can run the synthetic set and still appear on the leaderboard.
 - **Time-boxed, not turn-boxed**: wall-clock cap per task, with timeout recorded separately from genuine failure. On this benchmark that distinction is a *hardware* fact, and surfacing it is the point of the project.
 
 ## Consequences
@@ -33,10 +33,13 @@ Cost is managed by:
 
 - The headline number reflects Rust work rather than Rust puzzles.
 - The 43.7% repo-comprehension failure mode becomes measurable.
-- `capability_score` vs `capability_score_lite` is itself informative: a model that scores well on lite and poorly on full is good at Rust semantics and bad at codebases, which is a real and useful distinction.
+- `capability_score` vs `capability_score_synth` is itself informative: a model that scores well on the synthetic set and poorly on the full set is good at Rust semantics and bad at codebases, which is a real and useful distinction.
 
 **Bad**
 
 - The composite is no longer purely synthetic — category 10 is mined, so it inherits the oracle-quality caveat from [ADR-0002](0002-hand-written-and-mined-suites.md).
 - Longer minimum run times on weak hardware, partly offset by the lite score.
 - Mining yield for *small* commits is unproven — see [OPEN-QUESTIONS Q2](../OPEN-QUESTIONS.md). If yield collapses, the family budget needs revisiting, though the decision to include the category does not.
+
+
+> **Superseded in part.** The "fewer families (15 vs 20–25)" framing predates the core/probe split in [ADR-0008](0008-core-and-probe-categories.md), which fixed every probe category at 12. Round 5 also found that for 62–69% of qualifying crates the mined oracle sits inside a file the model is asked to edit, which defeats oracle isolation — see **Q25**.

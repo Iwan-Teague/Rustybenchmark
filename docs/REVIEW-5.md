@@ -314,6 +314,33 @@ points and still leaked 19% detection.
 
 ---
 
+## Follow-up pass — what has since been fixed
+
+Round 5's own warning was that 58 findings exceed what one sitting can absorb. A second pass has
+closed the arithmetic and drift classes. Fixed since the review was written:
+
+| Finding | What changed |
+|---|---|
+| `overall-ci-wrong-estimator` | Overall CI recomputed as a **stratified equal-weight category mean** — `Var = (1/121)·Σ Var_c`. `deep` ±4.1% → **±4.9%**, `standard` ±4.8% → **±5.7%**. Pooled and equal-weight effective N are now both published and labelled |
+| `standard-row-ci` | The `standard` row used the `deep` design effect inside a 2-seed row. Corrected to DE 1.30: **±12.5%** core, **±22.8%** probe. ADR-0006's third value for the same quantity corrected |
+| `deep-60tps-timing` | Decomposed into token-bound (64 s) and fixed (64 s: build+grade ×2, L4 once). `deep` @60 tok/s **20.2 h → 29.7 h**. Also publishes that L4 rises from **31% to 47%** of per-unit cost as hardware gets faster — `deep` is grading-bound on fast machines |
+| `tier-vs-standard-suite` | 04's tier rule makes 64 families deep-only (all of `unsafe-core`, plus `perf-optimization` and `cross-module`). `standard` now correctly runs **208 families across 8 categories**, ~11.7 h, ±6.5% |
+| `capability-score-denominator` | Denominator is now part of the score's identity: `categories_scored` is published, and **`capability_score_core5`** is the cross-machine key. Three documents that called the score machine-independent are qualified |
+| `W4-no-purely-synthetic-number` | **`capability_score_synth`** now exists — the figure ADR-0002 promised and the design never delivered |
+| `two-level-bootstrap-undercovers`, `shape-ceiling-invalidates-adr-0008`, `p35-cannot-measure-the-parameter` | Shape → family → seed clustering is now first-class in [07](07-statistics.md); the bootstrap resamples shapes; ADR-0008's budgets marked provisional; G2 corrected to measure the shape component. `idiom-refactor`'s crossed clustering flagged as needing a different estimator |
+| `p35-family-supply` | Circular gate broken — author **one core category to its full 40 families first**, then measure ICC, ρ and the shape component on it |
+| `W7-size-cap-contradiction` | Standardised on **≤5k LoC** workspace member crates, with the consequence stated: at a measured 10.4–12.3 tokens/LoC that is **52k–62k tokens of source**, so R2-S4's construct-validity argument needs re-deriving and the flat 2k-token timing model is an order of magnitude out |
+| `W11-corpus-split-arithmetic`, `glossary-and-count-drift` | Corpus split corrected to **248 synthetic / 24 mined**; GLOSSARY updated to eleven categories and 272 families, with `Core`/`Probe`/`Shape` entries added; ADR-0001/0002/0004 marked superseded-in-part; ADR-0007's async-verification lean replaced with R3-S6's measured conclusion |
+| `report-json-stale` | `effective_n` 632 (round 1's refuted figure) → 573 pooled / 408 equal-weight; core-category `n` 150 → 160; duplicate `icc_estimates` removed; `logic` and `constraint` added to the `failure_class` enum and `timeout` moved to `flags` |
+| `build-overhead-ratio-blind` | Redefined as **`harness_overhead_ratio`** covering every millisecond that is not the model, with the threshold re-derived (~0.50 at 20 tok/s, ~0.75 at 60) instead of carrying over a flat 0.3 that would fire on every healthy `deep` run |
+| `stale-seed-derivation` | 02's single-nonce formula replaced with ADR-0009's two-set derivation, and the two contradictory bullets deleted |
+
+**Still open**, tracked as Q22–Q27 and requiring measurement or a decision rather than an edit:
+R5-S1 (ρ), R5-S2 (secrecy architecture), R5-S4 (the mining pipeline's fate), R5-S5 (the plausibility
+checks), and the plumbing findings that need backend behaviour confirmed.
+
+---
+
 ## What survived round 5
 
 - **T1 replay.** Attacked from three surfaces; unbroken. It remains orthogonal to precomputation —

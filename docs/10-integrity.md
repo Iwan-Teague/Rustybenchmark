@@ -139,7 +139,7 @@ Hardware claims cannot be verified, but they are strongly coupled, which makes l
 | **Memory physics** — `peak_accel_mem_mb` must fit the claimed device and be consistent with `model_size × quant + kv_cache(ctx)` | Misreported model, quant, or device |
 | **Thermal signature** — laptops throttle 12–18% cold→stabilised | A "laptop" with perfectly flat 10-minute sustained throughput |
 | **Error-code fingerprint** — each model family has a characteristic rustc-diagnostic distribution | Output not actually produced by the declared model |
-| **Segment coherence** — calibration across segments, `build_overhead_ratio` drift | A run stitched together from different machines |
+| **Segment coherence** — calibration across segments, `harness_overhead_ratio` drift | A run stitched together from different machines |
 | **Canary leakage** — screen submitted output for canaries belonging to *other* instances | An agent that scraped or was fed a solution corpus |
 
 None is proof. All are cheap. Together they make a consistent fake require sustained effort, and every one of them produces a flag that a human reviewer can act on.

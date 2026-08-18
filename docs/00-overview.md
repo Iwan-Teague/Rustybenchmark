@@ -46,7 +46,7 @@ vram_efficiency     = capability_score / peak_accel_gb
 time_to_first_pass  = median seconds to a passing solution
 ```
 
-`capability_score` compares models and is comparable across machines. `throughput_score` compares machines and is only comparable within an execution class. Never merge them.
+`capability_score` compares models, and is comparable across machines **only when the category sets match** — `perf-optimization` is machine-gated, so `capability_score_core5` is the cross-machine key ([04](04-categories.md)). `throughput_score` compares machines and is only comparable within an execution class. Never merge them.
 
 ## Design principles
 

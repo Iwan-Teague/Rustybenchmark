@@ -93,9 +93,23 @@ Get this right and the rest is repetition.
 The experiment that the earlier draft omitted entirely, and on which all suite sizing depends.
 
 - 20 families × 16 seeds × 3 models ≈ 960 units ≈ 24 h of compute
+
+> **Scheduling defect, corrected.** As previously sequenced this phase needed 20 families while only
+> 3 existed at that point on the critical path, and it was circular besides: P5's sizing depends on
+> P3.5's ICC, while P3.5 needs families that P5 authors ([REVIEW-5.md](REVIEW-5.md)
+> `p35-family-supply`). Broken by **authoring one core category to its full 40 families first**, then
+> measuring on it. That yields both the within-family ICC *and* enough families to estimate the shape
+> component (R5-S3), which a 20-family sample spread across categories could not. P5's remaining
+> categories are sized from the measured value; the first category's own sizing is provisional and
+> is re-checked once the number exists.
 - Compute per-family and pooled ICC
 - **Estimate baseline core-vs-probe discordance per family**, which the sign-test detector needs in
   order to be calibrated (see [REVIEW-3.md](REVIEW-3.md) R3-S3). Same runs, no extra compute
+- **Measure ρ, the model × instance interaction** (**Q22**) — the same two-model runs give it for
+  free, and it is the highest-value number in the corpus: it decides whether seed-level pairing is
+  worth the entire secrecy architecture ([REVIEW-5.md](REVIEW-5.md) R5-S1)
+- **Estimate the shape component of ICC**, not only the within-family component — the latter is
+  invariant to the shape-clustering defect (R5-S3)
 - Recompute suite sizing, family budgets, and every published CI from the measured value
 
 **Exit / Gate G2:** measured ICC in hand; `deep` suite definition finalised.

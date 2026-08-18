@@ -43,7 +43,7 @@ Tracked separately as **Q21**.
 
 Rust-SWE-bench's pipeline is the model: >1k-star repos, PRs linked to issues and touching tests, Docker + cargo snapshot per PR, execution-based fail-to-pass validation, then human review. Their yield was 500 tasks from ~80k scraped PRs — roughly 0.6%.
 
-Open: can we get a usable yield restricted to *small* commits (3–10 files, ≤2k LoC repos)? If the yield collapses, category 10's family budget needs revisiting.
+Open: can we get a usable yield restricted to *small* commits (3–10 files, **≤5k LoC** workspace member crates — see W7 in [REVIEW-5.md](REVIEW-5.md))? Round 5 found two independently-shaped yield models agreeing that it collapses at the stated size. Superseded in practice by **Q25**, which asks whether the `wild` suite survives at all.
 
 ---
 
@@ -124,7 +124,7 @@ Needs a spike before the category is authored. Until resolved, `async-concurrenc
 
 **Blocks:** Phase 7. Raised by [REVIEW.md](REVIEW.md) S13.
 
-A 3–10 file, ≤2k LoC repo plus instructions plus repair diagnostics can exceed a 32k context. Small-context models would be scored on a category they were structurally prevented from attempting, conflating context window with capability.
+A 3–10 file, **≤5k LoC** crate plus instructions plus repair diagnostics is **52k–62k tokens of source alone** at a measured 10.4–12.3 tokens/LoC, which exceeds a 32k context outright. Small-context models would be scored on a category they were structurally prevented from attempting, conflating context window with capability.
 
 Options: declare a minimum context per suite and refuse below it; provide a retrieval interface so the model requests files; score `skipped_context` as a separate outcome rather than as failure. Leaning toward the first plus the third — refusing is honest, and a retrieval interface turns the category into an agentic benchmark, which is a different measurement.
 

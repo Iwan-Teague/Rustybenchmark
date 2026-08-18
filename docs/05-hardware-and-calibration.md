@@ -85,12 +85,21 @@ throughput_score     = tasks_passed / wall_clock_hour               (machine pro
 efficiency_score     = tasks_passed / kWh                           (where telemetry exists)
 vram_efficiency      = capability_score / peak_accel_gb
 time_to_first_pass   = median seconds from prompt to a passing solution
-build_overhead_ratio = build_ms / (build_ms + gen_ms)
+harness_overhead_ratio = (build_ms + grade_ms) / (prefill_ms + gen_ms + build_ms + grade_ms)
 ```
 
-`capability_score` is comparable across all machines and execution classes. `throughput_score`, `time_to_first_pass`, and `efficiency_score` are **only comparable within an execution class** — see [06-execution-classes.md](06-execution-classes.md).
+`capability_score` is comparable across machines and execution classes **only when both rows scored the same category set**; `capability_score_core5` always is, because those five categories are never machine-gated. `throughput_score`, `time_to_first_pass`, and `efficiency_score` are **only comparable within an execution class** — see [06-execution-classes.md](06-execution-classes.md).
 
-`build_overhead_ratio` is a harness-health metric: if it climbs above ~0.3 the timing numbers are measuring the user's disk more than their accelerator, and the cargo caching setup needs attention.
+`harness_overhead_ratio` is a harness-health metric: it covers **every millisecond that is not the
+model**. The old `build_overhead_ratio` omitted `prefill_ms` from the denominator and `grade_ms` from
+the numerator, which made it blindest at `deep` — the one tier where L4 (cargo-mutants + criterion)
+adds ~40 s of pure grading per unit. It was defined so that the tier where it matters most was the
+tier it could not see ([REVIEW-5.md](REVIEW-5.md) `build-overhead-ratio-blind`).
+
+Threshold re-derived against the deep-tier cost model rather than carried over: at 20 tok/s a healthy
+`deep` unit is 64 s model / 64 s harness, so the ratio is **~0.50 by design**, rising to ~0.75 at
+60 tok/s. A single 0.3 gate would fire on every healthy deep run. Publish `l4_share_of_grade`
+alongside it so a caching regression is distinguishable from mandatory mutation testing.
 
 ## Hardware classes
 

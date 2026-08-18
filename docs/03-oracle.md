@@ -54,7 +54,13 @@ Capture **every** diagnostic, not just success/failure.
 - `error_codes: Vec<String>` — e.g. `["E0499", "E0597"]`
 - `warn_count: u32`
 - `build_ms: u64`
-- `failure_class` (derived): `borrowck | trait | type | lifetime | async-send | syntax | resolve | idiom | other`
+- `failure_class` (derived): `borrowck | trait | type | lifetime | async-send | syntax | resolve | idiom | logic | constraint | other`
+
+  `logic` (compiled, failed L2) and `constraint` (compiled, passed L2, failed L3) were used in the
+  schema's own examples without existing in this enum — [REVIEW-5.md](REVIEW-5.md) `report-json-stale`.
+  `timeout` is **not** a failure class; it lives in `flags`, where the schema already puts it. The
+  R4-S6 drift check is extended to compare enum *members* against values used in schema examples, not
+  only field names against prose.
 - `diagnostic_completeness`: `full | typeck_only`
 - `classified_rate` (aggregate, per category)
 

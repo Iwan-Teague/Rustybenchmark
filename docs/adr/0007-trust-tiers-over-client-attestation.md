@@ -51,7 +51,7 @@ Hardware claims, which cannot be verified at all, are handled by coupled plausib
 
 - T1 requires uploading model output, which could leak solved instances into training corpora. Resolved by encrypting to a server key, retaining privately for the 90-day audit window, never publishing, and consenting to it **separately** from the statistics consent.
 - T2 requires network access between batches, so fully offline runs are capped at T0/T1.
-- Server-side replay costs real CPU at scale — see [OPEN-QUESTIONS Q6](../OPEN-QUESTIONS.md). Current lean: verify everything asynchronously, with the badge upgrading from T0 to T1 when verification completes.
+- Server-side replay costs real CPU at scale — see [OPEN-QUESTIONS Q6](../OPEN-QUESTIONS.md). **Resolved by measurement (R3-S6):** verify **every unit of every submission**, synchronously. A warm build+test+clippy cycle measures 0.65–0.68 s, giving 2.1–6.1 CPU-hours per `deep` submission — under 23 minutes wall on a 16-core box. No sampling, no asynchronous badge upgrade. Q6 and Q15 are closed.
 
 ## The control that actually caught things
 
