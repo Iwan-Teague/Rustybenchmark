@@ -87,6 +87,21 @@ Cost is managed rather than avoided:
 - **Separate reporting axis.** `capability_score`, `capability_score_synth` (nine synthetic categories) and `capability_score_core5` are published side by side. A slow machine can run lite and still appear, with the omission explicit rather than silently biasing the table.
 - **Time-boxed, not turn-boxed.** Wall-clock cap per task; timeout vs genuine failure is recorded separately, because on this benchmark the distinction is a *hardware* fact and separating it is the point.
 
+## The context gate is per category
+
+Each category declares `min_effective_ctx`. A single suite-level gate would mark `deep` **invalid for
+the entire 8–24 GB band the project targets**: `cross-module` at ≤5k LoC is 52k–62k tokens of source
+alone, plus a 32k completion budget, so the requirement is ~90k — while Ollama's default on that
+hardware band is 4k.
+
+A category whose requirement exceeds the probed effective context emits `skipped_context`, is
+**excluded from that category's denominator and reported as absent rather than zero**, and the row
+publishes `categories_scored`. A *run* is refused only when a **core** category is unattemptable.
+
+This closes the leaning recorded in **Q12** and composes with the denominator rule above: rows with
+different `categories_scored` are not comparable on `capability_score`, which is already the rule for
+`perf-optimization`.
+
 ## Tiers within a category
 
 Each family carries `tier = smoke | standard | deep`:

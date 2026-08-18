@@ -42,6 +42,11 @@ Encrypted to a server public key. Never published. Never in the public dump. Del
 ### Never uploaded
 
 - Absolute filesystem paths, hostnames, usernames
+- **`model_path`** (llama.cpp `/props` returns it, and it commonly contains the username)
+- **Ollama `modelfile`** (contains absolute paths and any user-authored system prompt)
+- **The chat-template body** (only its fingerprint is published, never the text — templates can be
+  hand-edited in some GUIs and may contain user content)
+- **`base_url`** (may encode an internal hostname or port topology)
 - Device serial numbers, MAC addresses, UUIDs derived from hardware
 - Exact GPU model + driver + core count as a *joint* tuple (see below)
 - Anything from outside the run directory

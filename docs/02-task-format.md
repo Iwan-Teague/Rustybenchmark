@@ -67,7 +67,12 @@ min_transform_jaccard     = 0.50   # transform-set     (primary, COMPOSITIONAL f
 mode          = "repair"          # single-shot | repair | agentic
 max_attempts  = 2                 # attempt 2 receives compiler + test output only
 context       = "files"           # files | diff | agent-tools
-budget_tokens = 16000             # completion cap; overrun is a scored failure
+budget_tokens = 32768             # completion cap; overrun is a scored failure.
+                                  # 16000 starved reasoning models outright: measured, one model
+                                  # returned finish_reason=length with ZERO characters of content at
+                                  # 100/200/400 tokens, and only at 600 did it emit 113 chars of
+                                  # correct code after 579 tokens -- ~94% of output was reasoning.
+                                  # Qwen3's own card specifies 32768, and 38912 for complex code.
 wall_timeout_s = 900
 
 [deps]

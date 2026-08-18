@@ -120,13 +120,24 @@ Needs a spike before the category is authored. Until resolved, `async-concurrenc
 
 ---
 
-## Q12 — Context limits for `cross-module`
+## Q12 — Context limits for `cross-module` · **CLOSED**
 
 **Blocks:** Phase 7. Raised by [REVIEW.md](REVIEW.md) S13.
 
 A 3–10 file, **≤5k LoC** crate plus instructions plus repair diagnostics is **52k–62k tokens of source alone** at a measured 10.4–12.3 tokens/LoC, which exceeds a 32k context outright. Small-context models would be scored on a category they were structurally prevented from attempting, conflating context window with capability.
 
 Options: declare a minimum context per suite and refuse below it; provide a retrieval interface so the model requests files; score `skipped_context` as a separate outcome rather than as failure. Leaning toward the first plus the third — refusing is honest, and a retrieval interface turns the category into an agentic benchmark, which is a different measurement.
+
+**Closed 2026-08-18** by [15-profiles-and-divisions.md](15-profiles-and-divisions.md) §2.4. The gate is
+**per category**: each declares `min_effective_ctx`; a category over budget emits `skipped_context`, is
+excluded from its own denominator and reported **absent rather than zero**, and the row publishes
+`categories_scored`. A run is refused only when a *core* category is unattemptable — the leaning this
+question recorded, now with the arithmetic behind it (`cross-module` needs ~90k; Ollama defaults to 4k
+on the target hardware band, so a suite-level gate would have invalidated `deep` for the entire
+audience).
+
+Preflight probes effective context by binary-searching prompt length until the server errors or
+`usage.prompt_tokens` stops tracking the input — which works on silently-truncating backends too.
 
 ---
 

@@ -15,3 +15,4 @@ Format: context, options, decision, consequences. Reversals keep the original re
 | [0007](0007-trust-tiers-over-client-attestation.md) | Server-side replay over client attestation | Accepted |
 | [0008](0008-core-and-probe-categories.md) | Core (40 families, rankable) vs probe (12, directional) categories | Accepted, from [REVIEW.md](../REVIEW.md) S3 |
 | [0009](0009-paired-core-and-fresh-probe-seeds.md) | Split epoch seeds into a paired core (scored) and a fresh probe (detector) | Accepted, from [REVIEW-2.md](../REVIEW-2.md) R2-S1 |
+| [0010](0010-pinned-tuned-open-divisions.md) | Pinned / Tuned / Open divisions; pin the request, gate the readable, key the coarse, condition the backend | Accepted |

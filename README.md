@@ -36,6 +36,7 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 | 11 | [docs/12-schemas.md](docs/12-schemas.md) | Every on-disk and on-wire schema in one place |
 | 12 | [docs/13-architecture.md](docs/13-architecture.md) | Crate layout and dependency direction |
 | 13 | [docs/14-roadmap.md](docs/14-roadmap.md) | Build order and the minimum shippable product |
+| 14 | [docs/15-profiles-and-divisions.md](docs/15-profiles-and-divisions.md) | What the harness pins, gates, keys and frees; the Pinned / Tuned / Open divisions; weights identity; MCP |
 
 Supporting:
 

@@ -39,6 +39,17 @@ The model's response is materialised into the workspace.
 
 **Emits:** `apply_ok: bool`, `apply_error: Option<String>`
 
+**L0 strips reasoning tags** (`<think>…</think>` and equivalents) before extraction when the row's
+`reasoning_format` is `none`. Reasoning mode is set by the *weights' chat template*, not by any
+request parameter — one measured template terminates the rendered prompt with
+`<|im_start|>assistant\n<think>\n`, so it cannot be declared away and must be detected.
+
+`apply_rate` is promoted from a weight-0.0 gate to a **published column**. A model that solves the
+problem but cannot emit an extractable answer is a distinct and interesting failure, and the output
+protocol moves it enormously: on identical Qwen2.5-Coder-32B weights and identical tasks, strict-diff
+format scored **8.0%** with 71.6% well-formed responses, whole-file **16.4%** with 99.6% — a **2.05×
+score difference from the response protocol alone**.
+
 Response-format failures land here. Track them: a model that can solve the problem but cannot emit a valid diff is a real and separately interesting result. Aider's benchmark demonstrates that strict diff-edit format is itself a discriminator.
 
 ## L1 — Compile (gate)

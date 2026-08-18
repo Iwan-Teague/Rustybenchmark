@@ -49,3 +49,15 @@ Leaderboard policy: `GpuFull` is the default view; `Hybrid` and `CpuOnly` are ta
 ## Implementation note
 
 Build `GpuFull` end to end first. `Hybrid` and `CpuOnly` fall out for free the moment `offload_ratio` is recorded — which should happen from day one whether or not those submissions are accepted. One field now avoids a schema migration later.
+
+
+---
+
+> **Amended 2026-08-18.** This ADR's consequence *"`capability_score` is comparable across all
+> classes. Correctness does not care where the layers ran"* has been **withdrawn as empirically
+> false**. Measured: 7/7 Rust prompts byte-different at `-ngl 0` vs `-ngl 99` under greedy decoding
+> with a fixed seed, top-1 token agreement 94.4% at `-ngl 0`, and one oracle-verdict flip (the GPU
+> answer compiled; the CPU answer returned a `&[u8]` slice as `&[u32]`). `exec_class` is part of the
+> row identity, like quantisation. The decision to *classify rather than ban* still stands and is
+> unaffected. See [15-profiles-and-divisions.md](../15-profiles-and-divisions.md) and
+> [ADR-0010](0010-pinned-tuned-open-divisions.md).

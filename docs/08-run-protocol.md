@@ -37,16 +37,24 @@ Work units are **independent and idempotent**. Re-running one produces the same 
 ```
 1. materialise model workspace       (skeleton + Cargo.toml + vendored deps symlink)
 2. assert no oracle content present  (content-hash check)
-3. enter sandbox
-4. render prompt, send to backend, capture response + token counts + timings
-5. exit sandbox
-6. materialise grading workspace     (fresh dir; skeleton + model response + oracle/)
-7. run L0..L4                        (each in the sandbox, each with its own timeout)
-8. write artifacts, append journal line, fsync
-9. wipe workspaces
+3. render prompt, send to backend, capture response + token counts + timings
+                                     (HARNESS process, NOT sandboxed -- see below)
+4. materialise grading workspace     (fresh dir; skeleton + model response + oracle/)
+5. run L0..L4 inside the sandbox     (each stage with its own timeout)
+6. write artifacts, append journal line, fsync
+7. wipe workspaces
 ```
 
-Steps 1–2 and 6 being separate directories is the core oracle-isolation control. See [03-oracle.md](03-oracle.md).
+Steps 1–2 and 4 being separate directories is the core oracle-isolation control. See [03-oracle.md](03-oracle.md).
+
+> **Corrected.** An earlier version wrapped the model call in `enter sandbox` / `exit sandbox` while
+> the network policy denied all network. The model server listens on loopback, so **the design as
+> written could not make a single model call.** The error came from conflating two different
+> containment jobs.
+>
+> The sandbox exists to contain **untrusted code the model wrote**, which only ever executes during
+> grading. Generation executes nothing — the harness makes an HTTP request from its own process and
+> receives text. Sandboxing that step protects against nothing and breaks the only thing it touches.
 
 ## Sandbox
 
@@ -67,9 +75,26 @@ Firecracker remains an option for a future hosted verification tier, where a ~50
 
 ### Network policy
 
-**Zero network access during generation and grading**, enforced by the OS rather than by policy. `cargo` runs `--offline` with pre-vendored dependencies. Any attempted connection is logged and fails the unit with `reason = "network_attempt"`.
+**Zero network access during grading** — the only phase in which model-authored code runs — enforced
+by the OS rather than by policy. `cargo` runs `--offline` with pre-vendored dependencies. Any attempted
+connection is logged and fails the unit with `reason = "network_attempt"`.
 
-This directly addresses one of the three documented Terminal-Bench misconduct cases (an agent fetching solutions from the internet).
+This directly addresses one of the three documented Terminal-Bench misconduct cases (an agent fetching
+solutions from the internet).
+
+**Loopback-permitting profiles are achievable, and that matters for the agentic track.** Measured on
+macOS seatbelt against a live listener:
+
+```
+baseline, no sandbox                                          -> HTTP 200
+(allow default)(deny network*)                                -> exit 7   <- deny works
+(deny network-outbound)(allow ... (remote ip "localhost:*"))  -> HTTP 200 <- loopback restorable
+```
+
+On Linux a network namespace with `lo` up gives the same. So "network-backed tools are categorically
+incompatible with the sandbox" is **a threat-model choice, not a mechanism fact** — the residual risk
+is that a local proxy on loopback can egress. The main benchmark does not need this (it offers no
+tools), but the agentic track's design must not be built on the false premise.
 
 ### Timeouts are harness-owned
 
@@ -115,10 +140,24 @@ a ranked vLLM row requires batch-invariant kernels.
 
 Therefore:
 
-- Record complete sampling configuration in every journal line: `{temp, top_p, top_k, seed, backend, backend_version, quant, ngl, ctx, batch, flash_attn, kv_cache_type}`.
+- Record and **send explicitly** the complete sampler chain, not a subset:
+  `{temperature, top_p, top_k, min_p, typ_p, repeat_penalty, presence_penalty, frequency_penalty,
+  xtc_probability, xtc_threshold, dry_multiplier, mirostat, seed}` plus
+  `{backend, backend_version, quant, ngl, ctx, batch, flash_attn, kv_cache_type}`.
+
+  Omitting a sampler yields the **server's** default, not a neutral one: llama.cpp `/props` reports
+  temp 0.8 / top_k 40 / top_p 0.95 / min_p 0.05 and a **nine-stage** chain, while vLLM instead applies
+  the model author's `generation_config.json`. Measured: 12 draws on a Rust prompt with no
+  `temperature` sent gave **5 distinct outputs, 2 of them not valid Rust**; `temperature=0` gave
+  12/12 identical. The old record covered 4 of 9 active samplers.
 - Default primary run: `temp = 0.0`, single sample.
 - `--pass-k 5 --temp 0.8` for the variance probe on a 10% subsample.
-- Flag and publish any case where identical `(model, seed, sampling)` produced different output.
+- Flag and publish any case where identical `(model, seed, sampling)` produced a different **oracle
+  verdict**. Byte-difference is the wrong criterion and would fire almost always: per-token top-1
+  agreement compounds as `a^L`, and Rust solutions run 400–1500 tokens. Even flash attention's
+  measured 99.873% agreement predicts ~40% of 400-token generations differing somewhere. **95%
+  byte-identity at L=500 needs 99.990% per-token agreement, which nothing measured comes close to.**
+  Verdict stability is the only criterion that survives generation length.
 
 ## Interaction modes
 

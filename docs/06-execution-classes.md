@@ -25,7 +25,21 @@ pub enum ExecClass {
 }
 ```
 
-Derived from the backend's reported layer split, not self-declared. For llama.cpp: `ngl` vs total layers, plus KV cache location. For vLLM/others: backend-specific probe, falling back to `Unknown` — and `Unknown` is not leaderboard-eligible.
+**Three sources, ranked** — the earlier rule said "derived from the backend's reported layer split…
+For llama.cpp: `ngl` vs total layers", which is **false and bans llama.cpp by accident**. Measured: a
+`llama-server` launched with `-ngl 99 -fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 1024 -t 6` exposes none of
+it — grepping the full `/props` body for `flash|cache_type|type_k|n_batch|n_ubatch|n_threads|n_gpu_layers|ngl|rope|yarn|offload`
+returns **zero hits**; `/slots` returns only `{id, n_ctx, speculative, is_processing}`; `/metrics` is
+501 without `--metrics`. Taken literally, every llama.cpp row was `Unknown` and therefore ineligible.
+
+| Source | How | Backends |
+|---|---|---|
+| `observed` | Read over HTTP | **Ollama only** — `/api/ps` gives `size` vs `size_vram` (offload ratio directly) and `context_length` |
+| `host` | Harness colocated with the server: launch args, accelerator memory attribution | Managed mode |
+| `declared` | Submitter states it | Everything else |
+
+`Unknown` now means **no source at all**, not "not machine-readable". A `declared` exec class is
+leaderboard-eligible at the self-reported tier, alongside hardware.
 
 ## Memory accounting
 

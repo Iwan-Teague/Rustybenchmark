@@ -51,6 +51,13 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
                "ctx": 32768, "ngl": 999 },
     "sampling": { "temp": 0.0, "top_p": 1.0, "top_k": 0, "seed": 42 },
     "exec_class": "GpuFull",
+    "exec_class_source": "declared",     // observed | host | declared  (never bans a backend)
+    "division": "pinned",                // pinned | tuned | open
+    "profile_hash": "blake3:...",        // the model profile this row was run under
+    "template_fingerprint": "blake3:...",
+    "reasoning_format": "none",          // detected from the template, not declared
+    "tools_offered": false,              // the `tools` key must be ABSENT, not empty
+    "categories_scored": ["borrow-lifetimes", "..."],
     "hw_fingerprint": "blake3:..."
   },
   "batches": [ { "index": 0, "nonce": "...", "expires_at": "...", "submitted": true } ]
@@ -108,6 +115,9 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
 
   "failure_class": "borrowck",
   "classified": true,               // false when classify() fell through to `other`
+  "finish_reason": "stop",          // stop | length | tool_calls -- from the server, self-reported
+  "cached_tokens": 0,               // usage.prompt_tokens_details.cached_tokens; must be 0
+  "apply_ok": true,                 // promoted to a published rate, not just a gate
   "flags": []
 }
 ```
