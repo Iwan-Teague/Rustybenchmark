@@ -31,7 +31,23 @@ Both cannot hold:
 | **Paired core** | ~85% | `blake3(epoch_seed \|\| task_id \|\| i)` — fixed per epoch, identical for every submitter | **Scored.** Cross-model comparison, McNemar pairing, all published figures |
 | **Fresh probe** | ~15% | `blake3(batch_nonce \|\| task_id \|\| i)` — per batch, per run | **Never scored.** Precomputation detector |
 
-The reported score comes from the paired core. The probe is a **detector**: a submission whose probe score falls materially below its core score did not earn the core score honestly.
+The reported score comes from the paired core. The probe is a **detector**.
+
+**The detector is a sign test on family-paired discordance, not a comparison of scores.** Probe seeds
+are drawn on families *already present in core*, so each probe unit pairs with that family's core
+result. Count families where core passed and probe failed against the reverse: honest execution is
+symmetric, precomputation is one-directional.
+
+Round 3 measured both designs at the same 15% probe share (163 families):
+
+| Detector | Detectable inflation (80% power, α=0.05) |
+|---|---|
+| Compare core and probe means (originally specified) | 12.4 pts |
+| **Sign test on family-paired discordance** | **~5.2 pts** |
+
+2.4× more sensitive at identical cost, and robust to the baseline discordance rate (3.7 pts at 10%
+baseline, 6.3 pts at 50%). A cheater precomputing 10% of core gains ~6 points — missed by the
+mean comparison, caught by the sign test.
 
 ```
 precompute_signal = core_score − probe_score
@@ -52,7 +68,11 @@ Both sets draw from the same families with the same seed-space, so under honest 
 
 - Epoch seeds are effectively public within the epoch. A determined attacker can precompute the core set for the current epoch — and will be caught by the probe only if they do not also solve the probe. Epoch rotation remains necessary; this does not replace it.
 - The probe costs ~15% of every run and produces no score.
-- **The detector's statistical power is unvalidated.** 15% of units may be too few to distinguish precomputation from ordinary sampling noise at useful confidence. The same effective-N arithmetic that round 1 applied to scoring has not been applied to the detector. Tracked as round 3 item 3; the 15% figure is provisional.
+- **The detector has an irreducible sensitivity floor, and it must be published.** Even at 50% probe
+  share the mean comparison bottoms out near 8 points and the sign test near 4. **Inflation below
+  roughly 4–5 points is undetectable at any probe size we can afford.** The probe is a screening test
+  with a stated floor, not a proof of honesty, and the leaderboard must say so rather than implying
+  the badge carries more assurance than it does.
 
 ## Related
 

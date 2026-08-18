@@ -241,6 +241,12 @@ When `interaction.mode = "repair"`, attempt 2 receives:
 
 - the exact rustc diagnostics from L1 (rendered, not JSON)
 - the names of failing tests and the shrunk counterexample from L2, **without the property source**
-- constraint violations from L3 with file:line
+- constraint violations from L3 with file:line — **lint name and location only**
+
+**Suggestion text is stripped for constraint-dominant categories.** Clippy emits machine-applicable
+fixes: `manual implementation of Option::map: help: try: m.get(k).map(|x| *x)` is not a hint, it is
+the complete answer. Feeding that back would make attempt 2 a copy operation and would turn
+`idiom-refactor` into a test of transcription. The lint *name* (`clippy::map_clone`) and the location
+are fed back; the `help: try: <code>` payload is not. See [REVIEW-3.md](REVIEW-3.md) R3-S2.
 
 It does **not** receive: the reference implementation, hidden test source, property source, or expected outputs. Both attempts are scored and both are recorded; the reported task score is attempt 2's. Attempt-1 score is retained as `first_try_score`, which is a separately interesting metric.

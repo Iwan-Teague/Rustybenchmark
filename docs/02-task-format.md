@@ -201,6 +201,7 @@ Every one of these is a hard gate. A family that fails any of them does not ship
 | Reference compiles clean under the family's own `constraints.toml` | The constraints are satisfiable |
 | Generation is deterministic: same seed → byte-identical instance | Resume and replay depend on this |
 | Prompt contains exactly one canary, and no oracle content | No leakage into the model's view |
+| **`cargo clippy --fix` does not solve the instance** | Round 3 measured `clippy --fix` auto-solving **2 of 3** sample de-idiomatization transforms unaided, with equivalence tests still passing. Run it on every generated instance; if the auto-fixed result converges toward the reference, reject. See [REVIEW-3.md](REVIEW-3.md) R3-S2 |
 
 `rustybench validate-family <id> --seeds 1000` runs all of the above.
 

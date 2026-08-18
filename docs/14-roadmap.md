@@ -94,6 +94,8 @@ The experiment that the earlier draft omitted entirely, and on which all suite s
 
 - 20 families × 16 seeds × 3 models ≈ 960 units ≈ 24 h of compute
 - Compute per-family and pooled ICC
+- **Estimate baseline core-vs-probe discordance per family**, which the sign-test detector needs in
+  order to be calibrated (see [REVIEW-3.md](REVIEW-3.md) R3-S3). Same runs, no extra compute
 - Recompute suite sizing, family budgets, and every published CI from the measured value
 
 **Exit / Gate G2:** measured ICC in hand; `deep` suite definition finalised.
@@ -156,7 +158,7 @@ Numeric thresholds, decided in advance, so a bad result triggers a decision rath
 | **G2** ICC | End of P3.5 | ICC ≤ 0.5 | At ICC > 0.5, seeds are worth little and per-core-category CI floors near ±12%. **Pivot:** raise core categories to 60 families and cut to 4 core categories, or accept that only the overall score is rankable |
 | **G3** Authoring rate | End of P3 | A new contributor authors a validated family in ≤ 2 days | At > 3 days/family the corpus is a 3-year project. **Pivot:** cut to 3 core categories, or invest another 4 weeks purely in generation tooling before proceeding |
 | **G4** Mining yield | Before P7 mining work | ≥ 12 usable families per mined category, drawn from **workspace member crates** at ≥200 stars and ≤5k LoC | The original filter (>1k stars **and** ≤2k LoC) was self-contradictory — Rust-SWE-bench's >1k-star pool averaged 993 files and 128k LoC, so the two constraints were nearly disjoint. Mining crates rather than repos is the fix. Yield is still unforgiving: 0.6% from ~80k PRs with no size constraint at all. **Pivot:** drop `cross-module` to hand-written multi-file synthesis, losing realism but keeping the category |
-| **G5** Minimum viable hardware | End of P4 | `smoke` completes in < 90 min on 8 GB VRAM | The consumer-hardware promise is unmet. Shrink `smoke`, or raise the stated minimum and say so plainly |
+| **G5** Minimum viable hardware | End of P4 | `smoke` completes in < 90 min on 8 GB VRAM **with a 7B-class Q4 model at `GpuFull`** | The consumer-hardware promise is unmet. Shrink `smoke`, or raise the stated minimum and say so plainly. The model must be named: at 8 GB the reference 30B-A3B offloads heavily and lands at 5–8 tok/s, putting `smoke` at 2.3–3.7 h. A 7B Q4 fits fully and finishes in ~30 min. See [REVIEW-3.md](REVIEW-3.md) R3-S5 |
 
 ---
 

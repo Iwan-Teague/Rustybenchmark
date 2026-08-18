@@ -17,7 +17,7 @@ Both contribute to `capability_score`. Only core categories may be compared agai
 |---|---|---|---|---|
 | 1 | `borrow-lifetimes` | aliasing, NLL, lifetime elision, avoiding self-reference, `split_at_mut`-shaped problems | **constraint-dominant** — allocation instrumentation + L1 error codes E04xx/E05xx | synth |
 | 2 | `traits-generics` | trait impls, coherence, GATs, blanket impls, associated types, where-clauses | L1 + L3 signature match | synth |
-| 3 | `error-handling` | `?`, custom `From`, `thiserror`/`anyhow`, exhaustive matching, error type design | L2 behavior + L3 | synth |
+| 3 | `error-handling` | `?`, custom `From`, `thiserror`/`anyhow`, exhaustive matching — **plumbing, not taxonomy design** (see below) | L2 behavior + L3, with the public error type pinned in the skeleton | synth |
 | 4 | `idiom-refactor` | imperative → iterator, `Option`/`Result` combinators, clippy-clean rewrites | **constraint-dominant** | synth |
 | 5 | `unsafe-core` | raw pointers, transmute, aliasing rules, `Send`/`Sync` impls, safe wrappers over unsafe cores | **miri mandatory**; UB = hard behavior failure | synth |
 
@@ -38,7 +38,7 @@ Both contribute to `capability_score`. Only core categories may be compared agai
 
 **Corpus total: 272 families.** ~236 synthetic, ~36 mined.
 
-## Why these ten
+## Why these eleven
 
 Categories 1, 2, 4, 5 cover the semantics that Rust-SWE-bench attributes **32.6%** of agent failures to and that no general-purpose coding benchmark can see. Category 10 covers the **43.7%** attributed to repo-wide structure comprehension. Category 8 is the contamination probe — RustEvo² measured a **56.1% → 32.5%** before/after-cutoff cliff on exactly this axis, which makes it a direct, quantified memorisation detector.
 
@@ -69,7 +69,7 @@ Cost is managed rather than avoided:
 
 - **Probe class (12 families), equal category weight.** Its own score is directional only, but it still contributes to the composite.
 - **Bounded repos.** 3–10 files, ≤2k LoC, pre-vendored dependencies, prebuilt dependency workspace. Mining targets *small* fail-to-pass commits specifically; they exist in quantity.
-- **Separate reporting axis.** Both `capability_score` (all ten) and `capability_score_lite` (categories 1–9) are published side by side. A slow machine can run lite and still appear, with the omission explicit rather than silently biasing the table.
+- **Separate reporting axis.** Both `capability_score` (all eleven) and `capability_score_lite` (the other ten) are published side by side. A slow machine can run lite and still appear, with the omission explicit rather than silently biasing the table.
 - **Time-boxed, not turn-boxed.** Wall-clock cap per task; timeout vs genuine failure is recorded separately, because on this benchmark the distinction is a *hardware* fact and separating it is the point.
 
 ## Tiers within a category
@@ -102,6 +102,21 @@ capability_score_lite = mean over the 10 categories excluding `cross-module`
 ```
 
 Probe categories are noisier individually but contribute acceptably to an 11-way mean. Alternative weightings (usage-frequency, difficulty) are published as secondary columns once there is data to justify them, never as the default.
+
+## `error-handling` tests plumbing, not error design
+
+Error-handling references are non-unique in a way that reaches *observable behaviour*: many valid
+error designs differ in variant naming and structure while being equally correct. A differential
+oracle comparing candidate against reference error output would penalise a model for choosing
+different, correct names.
+
+So these families **pin the public error type in the skeleton**. The enum is given; the model
+implements the plumbing. The differential then compares *which variant* is returned, not how it is
+spelled.
+
+The honest consequence: choosing a good error taxonomy — arguably the most interesting judgement in
+Rust error handling — **is not gradeable by this oracle and is out of scope**. A rename to
+`error-plumbing` is worth considering for accuracy. See [REVIEW-3.md](REVIEW-3.md) R3-S4.
 
 ## Per-category oracle weights
 

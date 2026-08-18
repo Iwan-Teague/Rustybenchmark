@@ -17,8 +17,12 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
   "harness_version": "0.4.1",
   "epoch": "2026-08",
   "challenge": { "mode": "batched", "batch_size": 50 },
-  "units": [
-    { "index": 0, "unit_id": "blake3:...", "task_id": "borrowck/split-mut-window", "seed": 8412739123, "batch": 0 }
+  "epoch_seed": "...",
+  "core": [
+    { "index": 0, "unit_id": "blake3:...", "task_id": "borrowck/split-mut-window", "seed": 8412739123 }
+  ],
+  "probe": [
+    { "index": 0, "task_id": "borrowck/split-mut-window", "batch": 0, "seed": null }
   ]
 }
 ```
@@ -71,6 +75,8 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
   "category": "borrow-lifetimes",
   "subcategory": "aliasing",
   "seed": 8412739123,
+  "set": "core",                  // core | probe -- core is scored, probe is detector-only
+  "batch_nonce": null,            // probe units only; lets the server verify seed derivation
   "canary": "rb-9f3c1a7e",
   "attempt": 2,
 

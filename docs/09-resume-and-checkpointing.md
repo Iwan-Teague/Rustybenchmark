@@ -40,16 +40,41 @@ macOS uses `~/Library/Application Support/Rustybenchmark/runs/`; Windows uses `%
 ```json
 {
   "run_id": "01K3F...",
-  "plan_hash": "blake3:...",
+  "plan_hash": "blake3:...",          // covers core units + probe SLOT STRUCTURE
   "suite": "deep",
   "epoch": "2026-08",
-  "challenge_nonce": "...",
-  "units": [
+  "epoch_seed": "...",                // public, shared by all submitters -> pairing
+  "core": [
     { "index": 0, "unit_id": "...", "task_id": "borrowck/split-mut-window", "seed": 8412739123 },
     { "index": 1, "unit_id": "...", "task_id": "traits/blanket-coherence",  "seed": 1177340022 }
+  ],
+  "probe": [
+    { "index": 0, "task_id": "borrowck/split-mut-window", "batch": 0, "seed": null }
   ]
 }
 ```
+
+### Why probe units are slots, not units
+
+Probe seeds derive from a `batch_nonce` issued **during** execution, per batch, expiring in hours
+([ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md)). They cannot be known at freeze time, so
+listing them as ordinary units breaks the plan in four places: the seed is undefined, `unit_id` is
+therefore uncomputable, a progressively-filled `plan_hash` changes every batch and fails the first
+resume gate, and a nonce that expires mid-segment leaves the run unable to finish.
+
+So the plan carries **core units** (fully specified, epoch-derived, frozen) and **probe slots**
+(`task_id` and position only). `plan_hash` covers the core units completely and the probe slot
+*structure* — never probe seeds.
+
+**On resume, unfinished probe slots in an expired batch are re-issued a fresh nonce and fresh seeds.**
+That is sound for one specific reason worth stating plainly: **probe units are re-drawable because
+they are never scored.** Core units are not re-drawable, because they are paired across submitters
+and re-drawing would break the pairing. The scoring/detection split introduced to resolve
+[R2-S1](REVIEW-2.md) is exactly what makes this resume problem solvable. See
+[REVIEW-3.md](REVIEW-3.md) R3-S1.
+
+The journal records which `batch_nonce` produced each probe unit, so the server can still verify
+derivation.
 
 Frozen means: the entire ordered work list is computed and written **before the first unit runs**. Resume never re-derives it. If the plan could change between sessions, resume would silently produce a run that is a mixture of two different suites.
 

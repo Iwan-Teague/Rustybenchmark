@@ -25,7 +25,7 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 | — | [docs/01-prior-art.md](docs/01-prior-art.md) | What already exists, with figures, and the gap we fill |
 | 1 | [docs/02-task-format.md](docs/02-task-format.md) | What a task *is* — manifest, generator contract, solution-first generation |
 | 2 | [docs/03-oracle.md](docs/03-oracle.md) | How a solution is graded — the five layers |
-| 3 | [docs/04-categories.md](docs/04-categories.md) | The ten Rust skill categories and their family budgets |
+| 3 | [docs/04-categories.md](docs/04-categories.md) | The eleven Rust skill categories, core vs probe, and their family budgets |
 | 4 | [docs/05-hardware-and-calibration.md](docs/05-hardware-and-calibration.md) | Host inventory, inference calibration, derived metrics |
 | 5 | [docs/06-execution-classes.md](docs/06-execution-classes.md) | GPU / hybrid / CPU classification and memory accounting |
 | 6 | [docs/07-statistics.md](docs/07-statistics.md) | Suite sizing, ICC, power analysis, confidence intervals |
@@ -41,6 +41,7 @@ Supporting:
 
 - **[docs/REVIEW.md](docs/REVIEW.md)** — adversarial review round 1. Read this alongside the docs it corrects; several published figures were wrong and the category design changed as a result
 - **[docs/REVIEW-2.md](docs/REVIEW-2.md)** — adversarial review round 2, empirical against rustc 1.97. Found a direct contradiction between the statistical and integrity designs, and measured the diagnostic instrumentation to be blind for a third of realistic failures
+- **[docs/REVIEW-3.md](docs/REVIEW-3.md)** — adversarial review round 3. Settled four deferred questions empirically; two settled against the design. `cargo clippy --fix` solves part of a core category, and the frozen plan could not hold probe units
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — terms used precisely throughout
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with the phase each blocks
 - [docs/adr/](docs/adr/) — architecture decision records, including reversals

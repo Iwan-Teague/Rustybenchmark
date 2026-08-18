@@ -50,11 +50,14 @@ If every quant of every model is its own row, the table is unreadable. If they a
 
 ---
 
-## Q6 — Server hosting and cost
+## Q6 — Server hosting and cost · **CLOSED**
 
 **Blocks:** Phase 6.
 
 T1 replay means the server re-runs the oracle for every submitted unit. At 1200 units per `deep` run, that is real CPU. Options: verify a random sample (say 20%) rather than everything, verify everything but queue it asynchronously, or require submitters to fund verification for large suites. Sampling weakens the guarantee; queuing does not. Leaning toward: verify everything, asynchronously, with the tier badge upgrading from T0 to T1 when verification completes.
+
+
+**Closed 2026-08-17 by measurement** ([REVIEW-3.md](REVIEW-3.md) R3-S6). See Q15.
 
 ---
 
@@ -112,7 +115,7 @@ Monthly is the working assumption. Shorter epochs mean fresher seeds but fewer m
 
 ---
 
-## Q13 — Probe-subset detector power
+## Q13 — Probe-subset detector power · **CLOSED**
 
 **Blocks:** Phase 6. Raised by [REVIEW-2.md](REVIEW-2.md) R2-S1 / [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md).
 
@@ -120,9 +123,19 @@ The fresh-probe subset (~15% of units) detects precomputation by comparing probe
 
 Unvalidated: can a gap of the size a cheater would produce be distinguished from ordinary sampling noise at useful confidence? The 15% figure is provisional and should be derived from a power calculation on the detector, not chosen for looking reasonable.
 
+
+**Closed 2026-08-17 by calculation** ([REVIEW-3.md](REVIEW-3.md) R3-S3). The power arithmetic was
+done. At 15% probe the originally specified score-comparison detects only **12.4 points** of
+inflation; a **sign test on family-paired discordance** detects **~5.2 points** at identical cost.
+The detector is now the sign test, and probe seeds are drawn on families already present in core so
+the pairing exists. 15% stands.
+
+**Residual, published rather than hidden:** inflation below roughly **4–5 points** is undetectable at
+any probe share we can afford. The probe is a screening test with a stated floor.
+
 ---
 
-## Q14 — Are `de_idiomatize` transforms invertible in practice?
+## Q14 — Are `de_idiomatize` transforms invertible in practice? · **CLOSED, badly**
 
 **Blocks:** authoring `idiom-refactor` (Phase 5). Raised by [REVIEW-2.md](REVIEW-2.md) R2-S6.
 
@@ -130,10 +143,74 @@ Each clippy lint has a conceptual inverse, but applying several mechanically may
 
 Needs a Phase 3 spike alongside the exemplar family: generate 20 instances, have a Rust developer judge whether they read as plausible real code.
 
+
+**Closed 2026-08-17 by test** ([REVIEW-3.md](REVIEW-3.md) R3-S2). Two answers.
+
+**Invertibility: yes.** Three transform classes (iterator→index loop, `Option::map`→`match`,
+`?`→`match`) round-trip with identical behaviour across empty, negative, boundary, and repeated
+inputs. The output reads as ordinary novice Rust, not machine-mangled.
+
+**But the task is not hard.** `cargo clippy --fix` solved **2 of the 3** unaided, with equivalence
+tests still passing — clippy's `help: try:` text on machine-applicable lints *is* the answer. This
+compromised a core, rankable category. Three fixes landed: a new family-validation gate (`clippy
+--fix` must not solve the instance), exclusion of machine-applicable inverses from the transform
+catalogue, and stripping suggestion text from repair feedback.
+
+The legitimate task space is the transform classes clippy can *detect but not mechanically apply*.
+It is smaller than assumed, and authoring for this category is correspondingly harder.
+
 ---
 
-## Q15 — Server-side replay cost under the corrected timing model
+## Q15 — Server-side replay cost under the corrected timing model · **CLOSED**
 
 **Blocks:** Phase 6. Supersedes part of Q6.
 
 Q6 was written before the round-1 timing correction. A `deep` run is 1088 scored units, and T1 replay re-runs L0–L3 for every one. At corrected build-and-grade costs this is materially more server CPU than Q6 assumed. Re-derive before committing to "verify everything asynchronously".
+
+
+**Closed 2026-08-17 by measurement** ([REVIEW-3.md](REVIEW-3.md) R3-S6). A warm `cargo build` +
+`test` + `clippy` cycle measures **0.65–0.68 s** and barely scales with crate size (0.68 s at 15
+lines / 2 tests; 0.65 s at 365 lines / 60 tests) — incremental compilation dominates. At a
+conservative 3 s per non-miri unit, one `deep` submission costs **2.1–6.1 CPU-hours** depending on
+miri cost, or under 23 minutes wall on a 16-core box.
+
+**Decision: verify every unit of every submission.** No sampling, no asynchronous badge upgrade, no
+submitter-funded verification. A small cloud bill, not an architectural constraint.
+
+---
+
+## Q16 — Does the sign-test detector survive an adaptive adversary?
+
+**Blocks:** Phase 6. Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
+
+R3-S3 computed the detector's power against a *naive* cheater who precomputes a random subset. An adaptive one has options: precompute only families they predict will be probed, or deliberately fail some core units to flatten the discordance signal and stay under the threshold.
+
+The second is the interesting one, because it is self-limiting — suppressing core passes to hide inflation gives back the points the inflation bought. Needs the arithmetic done properly: is there a strategy that nets a gain while staying below the ~5-point detection floor?
+
+---
+
+## Q17 — Is `min_instance_distance` measurable for compositional families?
+
+**Blocks:** authoring `idiom-refactor` (Phase 5). Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
+
+For parametric families the skeleton is an *ablation* of the reference, so prompt-to-prompt tree-edit distance is well defined. For compositional families the skeleton is a *transform* of the reference, and two instances applying the same three transforms to different code may be structurally near-identical by tree-edit distance while being genuinely different tasks — or the reverse.
+
+The gate may be measuring the wrong thing for half the corpus. Needs validation against real generated instances before the gate is trusted for compositional families.
+
+---
+
+## Q18 — Does miri leave enough task space for 40 `unsafe-core` families?
+
+**Blocks:** Phase 7. Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
+
+R3 split `unsafe-ffi` because miri cannot execute foreign calls, moving FFI to a probe category and keeping `unsafe-core` as a core category with miri mandatory. But miri has further limitations — restricted `libc`, no real syscalls, some `std` internals unsupported — and `unsafe-core` needs **40 families**, the full core budget.
+
+If miri-checkable unsafe Rust does not span 40 genuinely distinct family shapes, the category either shrinks below core size or admits families miri cannot check, which defeats the split. Needs a feasibility survey before P7.
+
+---
+
+## Process note — schema drift
+
+Both R3-S1 and M3-1 were schema gaps created by prose changes in other documents: probe units were specified in [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md) and [10-integrity.md](10-integrity.md) without ever reaching [12-schemas.md](12-schemas.md), and the resulting contradiction with the frozen plan went unnoticed for a full review round.
+
+**The schemas are drifting behind the design.** Round 4 should cross-check [12-schemas.md](12-schemas.md) against every other document, and thereafter any change introducing a new field or unit kind must patch the schema in the same commit.
