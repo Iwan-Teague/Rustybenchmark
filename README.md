@@ -42,6 +42,7 @@ Supporting:
 - **[docs/REVIEW.md](docs/REVIEW.md)** — adversarial review round 1. Read this alongside the docs it corrects; several published figures were wrong and the category design changed as a result
 - **[docs/REVIEW-2.md](docs/REVIEW-2.md)** — adversarial review round 2, empirical against rustc 1.97. Found a direct contradiction between the statistical and integrity designs, and measured the diagnostic instrumentation to be blind for a third of realistic failures
 - **[docs/REVIEW-3.md](docs/REVIEW-3.md)** — adversarial review round 3. Settled four deferred questions empirically; two settled against the design. `cargo clippy --fix` solves part of a core category, and the frozen plan could not hold probe units
+- **[docs/REVIEW-4.md](docs/REVIEW-4.md)** — adversarial review round 4. The precomputation detector is defeated by an adversary willing to fail units deliberately; seed secrecy replaces it as the primary control. Also records a near-miss simplification that two simulations disagreed about
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — terms used precisely throughout
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with the phase each blocks
 - [docs/adr/](docs/adr/) — architecture decision records, including reversals

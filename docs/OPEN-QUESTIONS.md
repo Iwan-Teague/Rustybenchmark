@@ -179,7 +179,7 @@ submitter-funded verification. A small cloud bill, not an architectural constrai
 
 ---
 
-## Q16 — Does the sign-test detector survive an adaptive adversary?
+## Q16 — Does the sign-test detector survive an adaptive adversary? · **CLOSED — it does not**
 
 **Blocks:** Phase 6. Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
 
@@ -187,9 +187,23 @@ R3-S3 computed the detector's power against a *naive* cheater who precomputes a 
 
 The second is the interesting one, because it is self-limiting — suppressing core passes to hide inflation gives back the points the inflation bought. Needs the arithmetic done properly: is there a strategy that nets a gain while staying below the ~5-point detection floor?
 
+
+**Closed 2026-08-17 by simulation** ([REVIEW-4.md](REVIEW-4.md) R4-S1). **No.** An adversary who
+precomputes *and* deliberately fails core units to rebalance the discordance keeps **+9 to +10 points
+of inflation at 0% detection** (20% precomputation, 300 trials). Family-aggregate pairing and
+probe/core indistinguishability were both tested; both failed.
+
+The ratio is structural: the cheat pays off across 1088 scored units while the detector observes 163
+family-level pairs, so hiding is ~6.7× cheaper than the gain. No test statistic fixes that.
+
+**Consequence:** the probe is demoted to a screening test and **seed secrecy becomes the primary
+control** — core seeds are not published until their epoch closes. The self-cancelling intuition that
+suppression must cost what it gains is wrong, and was only caught by simulating rather than trusting
+the algebra.
+
 ---
 
-## Q17 — Is `min_instance_distance` measurable for compositional families?
+## Q17 — Is `min_instance_distance` measurable for compositional families? · **CLOSED**
 
 **Blocks:** authoring `idiom-refactor` (Phase 5). Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
 
@@ -197,15 +211,36 @@ For parametric families the skeleton is an *ablation* of the reference, so promp
 
 The gate may be measuring the wrong thing for half the corpus. Needs validation against real generated instances before the gate is trusted for compositional families.
 
+
+**Closed 2026-08-17 by test** ([REVIEW-4.md](REVIEW-4.md) R4-S4). The hypothesised *inversion* did
+not reproduce — surface distance returned the correct verdict on both probes. But the margins were
+0.146 and 0.331 either side of a 0.25 threshold, where transform-set Jaccard gives an unambiguous
+0.00 and 1.00. Surface distance is a correlate that holds only while reskins are shallow.
+
+**Resolution:** compositional families gate on `min_transform_jaccard` as primary, surface distance
+secondary.
+
 ---
 
-## Q18 — Does miri leave enough task space for 40 `unsafe-core` families?
+## Q18 — Does miri leave enough task space for 40 `unsafe-core` families? · **CLOSED — barely**
 
 **Blocks:** Phase 7. Raised by [REVIEW-3.md](REVIEW-3.md) round 4 scope.
 
 R3 split `unsafe-ffi` because miri cannot execute foreign calls, moving FFI to a probe category and keeping `unsafe-core` as a core category with miri mandatory. But miri has further limitations — restricted `libc`, no real syscalls, some `std` internals unsupported — and `unsafe-core` needs **40 families**, the full core budget.
 
 If miri-checkable unsafe Rust does not span 40 genuinely distinct family shapes, the category either shrinks below core size or admits families miri cannot check, which defeats the split. Needs a feasibility survey before P7.
+
+
+**Closed 2026-08-17 by survey** ([REVIEW-4.md](REVIEW-4.md) R4-S5). About **16 distinct
+miri-checkable shapes** exist (provenance, transmute, `MaybeUninit`, `&mut` aliasing, use-after-free,
+custom allocators, `Pin`, unions, drop order, packed refs, `from_utf8_unchecked`, `NonNull`, threads
+and data races, atomics (partial), alignment, int-to-ptr provenance). At 2–3 families per shape that
+is 32–48 — so 40 fits, but near the ceiling.
+
+**The consequence that matters:** 40 families across ~16 shapes means families cluster, so the
+category's effective **ICC exceeds the corpus-wide 0.3** and its honest CI is nearer ±12.3% than the
+±10.7% claimed. ICC is now estimated and published **per category**, not pooled. Miri's ~60×
+slowdown independently validates the 30–120 s/unit figure used in [R3-S6](REVIEW-3.md).
 
 ---
 
@@ -214,3 +249,21 @@ If miri-checkable unsafe Rust does not span 40 genuinely distinct family shapes,
 Both R3-S1 and M3-1 were schema gaps created by prose changes in other documents: probe units were specified in [ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md) and [10-integrity.md](10-integrity.md) without ever reaching [12-schemas.md](12-schemas.md), and the resulting contradiction with the frozen plan went unnoticed for a full review round.
 
 **The schemas are drifting behind the design.** Round 4 should cross-check [12-schemas.md](12-schemas.md) against every other document, and thereafter any change introducing a new field or unit kind must patch the schema in the same commit.
+
+---
+
+## Q19 — Can seed secrecy survive a confederate inside an open epoch?
+
+**Blocks:** Phase 6. Raised by [REVIEW-4.md](REVIEW-4.md) R4-S2.
+
+Seed secrecy is now the primary precomputation control, but a submitter who has already run holds the epoch's core seeds and can pass them to a confederate before the epoch closes.
+
+Open: is per-submitter seed **salting** possible while preserving enough pairing — for example, pairing only across submitters who share a salt cohort, accepting a smaller effective comparison set in exchange for removing the leak channel? Needs the power arithmetic doing on cohort sizes.
+
+---
+
+## Q20 — Do the plausibility checks survive the same suppression attack?
+
+**Blocks:** Phase 6. Raised by [REVIEW-4.md](REVIEW-4.md) round 5 scope.
+
+R4-S1 showed a fresh-subset detector is defeated by an adversary willing to throw units. The plausibility checks in [10-integrity.md](10-integrity.md) — throughput consistency, memory physics, thermal signature, error-code fingerprint, canary cross-screening — have **never been modelled adversarially at all**. They were designed against carelessness, not against someone optimising against them.

@@ -18,7 +18,13 @@ tasks/borrowck/split-mut-window/
     └── constraints.toml # static / lint gates
 ```
 
-Generators are public. Seeds used in a run are public. **A solved instance is never published.**
+Generators are public. **A solved instance is never published.**
+
+**Seeds are secret while their epoch is open.** They are published when the epoch closes, with the
+epoch's raw dump. Publishing them live would hand the second submitter in an epoch everything needed
+to precompute the shared core seed set — and [R4-S1](REVIEW-4.md) shows the probe detector cannot
+catch a submitter who precomputes and suppresses. Independent re-derivation stays fully possible,
+delayed by one epoch. See [REVIEW-4.md](REVIEW-4.md) R4-S2.
 
 ## Manifest — `task.toml`
 
@@ -48,8 +54,14 @@ variance = { structural = true, naming = true, numeric = true, api_surface = tru
 # Reference-implementation distance is checked as a secondary signal only: two
 # instances can have distant references and near-identical prompts, which is the
 # same question from the model's point of view. Enforced in CI.
-min_instance_distance     = 0.25   # prompt + skeleton (primary)
+min_instance_distance     = 0.25   # prompt + skeleton (primary, PARAMETRIC families)
 min_reference_distance    = 0.20   # reference impl    (secondary)
+min_transform_jaccard     = 0.50   # transform-set     (primary, COMPOSITIONAL families)
+
+# For a compositional family, task identity IS the transform set, not the surface. Round 4
+# measured surface distance landing at 0.146 / 0.331 either side of a 0.25 threshold on cases
+# where transform-set Jaccard gives an unambiguous 0.00 / 1.00. Surface distance is a correlate
+# that holds only while reskins are shallow. See REVIEW-4.md R4-S4.
 
 [interaction]
 mode          = "repair"          # single-shot | repair | agentic

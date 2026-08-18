@@ -145,6 +145,12 @@ ICC is an **assumption, not a measurement** (see [REVIEW.md](REVIEW.md) S2). Ove
 Suite sizing is **provisional until Phase 3.5 measures the real ICC**. That experiment is a hard
 gate before corpus scale-up.
 
+**ICC is estimated and published per category, not pooled.** Round 4 found that `unsafe-core`'s
+40 families must spread across only ~16 miri-checkable task shapes, so families within a shape are
+correlated and the category's effective ICC exceeds the corpus-wide 0.3. Its honest CI is nearer
+±12.3% than the ±10.7% a pooled value implies. Any category whose families cluster into few shapes
+has the same problem, so the estimate belongs per category. See [REVIEW-4.md](REVIEW-4.md) R4-S5.
+
 ### There is no `full` suite
 
 An earlier draft specified `full` at 16 seeds. It was deleted. Going 4 → 16 seeds improves

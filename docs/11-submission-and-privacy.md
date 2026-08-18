@@ -69,7 +69,13 @@ Driver versions are published as major only, and only where they materially affe
 
 ## The public dump
 
-**Publish the entire submission corpus** (redacted, no model output) as a downloadable dataset, refreshed regularly, with the leaderboard's aggregation code open-sourced alongside it.
+**Publish the entire submission corpus** (redacted, no model output) as a downloadable dataset, with the leaderboard's aggregation code open-sourced alongside it.
+
+**Timing matters: the dump for an epoch is released only when that epoch closes.** Core seeds are
+identical for every submitter in an epoch, so publishing them live would hand the second submitter
+everything needed to precompute — and the probe detector cannot catch a submitter who precomputes
+and suppresses ([REVIEW-4.md](REVIEW-4.md) R4-S1). Delayed publication preserves independent
+re-derivation while removing the window in which the dump is an attack tool.
 
 Rationale: this is the strongest integrity mechanism available. All three documented Terminal-Bench misconduct cases were found by independent community analysis of published data, not by platform checks. A leaderboard whose numbers cannot be independently re-derived is asking to be trusted; one whose numbers can be is worth trusting.
 
@@ -83,7 +89,7 @@ Deliberately small. Do not build this until the local runner is good.
 POST /challenge/batch      issue batch nonce + unit range
 POST /submit               accept manifest (+ encrypted artifacts)
 GET  /leaderboard          aggregated view, filterable by exec_class / hw_class / tier
-GET  /dump/<epoch>.jsonl   public raw corpus
+GET  /dump/<epoch>.jsonl   public raw corpus -- released only after <epoch> CLOSES
 GET  /epoch/current        active epoch, suite hash, generator commit
 ```
 

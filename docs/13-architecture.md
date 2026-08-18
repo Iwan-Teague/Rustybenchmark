@@ -84,6 +84,11 @@ These are the ones that, if violated, silently corrupt results rather than crash
 4. **The journal is append-only.** No code path rewrites a journal line. Corrections are new lines with a supersedes field, if ever needed.
 5. **Generation is pure in the seed.** Property test: same seed ⇒ byte-identical `Instance`, across 1000 seeds, in CI.
 6. **The plan is immutable after freezing.** `plan.json` is written once and opened read-only thereafter.
+7. **Any change introducing a field or unit kind patches [12-schemas.md](12-schemas.md) in the same
+   commit.** Rounds 2 and 3 introduced twelve fields that never reached the schema, and one of the
+   resulting gaps ([R3-S1](REVIEW-3.md)) was an architectural contradiction that survived a full
+   review round. A mechanical drift check — identifiers used in prose versus present in the schema —
+   runs in CI.
 
 ## Testing strategy
 

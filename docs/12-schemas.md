@@ -85,6 +85,8 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
     "compile_ok": false,
     "error_codes": ["E0499"],
     "warn_count": 2,
+    "diagnostic_completeness": "typeck_only",   // full | typeck_only -- was borrowck reached?
+    "compile_rate_contrib": 0,
     "behavior": { "unit": null, "property": null, "differential": null, "score": null },
     "constraint": { "clippy": null, "fmt": null, "unsafe_blocks": 0,
                     "forbidden": [], "score": null },
@@ -105,6 +107,7 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
   },
 
   "failure_class": "borrowck",
+  "classified": true,               // false when classify() fell through to `other`
   "flags": []
 }
 ```
@@ -172,6 +175,10 @@ Every field carries `source`, so a value from `wgpu` fallback is distinguishable
   "time_to_first_pass_s": 47.3,
   "efficiency_score": null,
   "error_histogram": { "E0499": 41, "E0308": 96, "E0277": 133 },
+  "compile_rate": 0.61,
+  "classified_rate": { "borrow-lifetimes": 0.88, "idiom-refactor": 0.94 },
+  "build_overhead_ratio": 0.14,
+  "icc_measured": { "borrow-lifetimes": 0.31, "unsafe-core": 0.52 },
   "failure_classes": { "borrowck": 88, "trait": 133, "type": 96, "logic": 210, "timeout": 4 },
   "segments": 4,
   "icc_estimates": { "borrow-lifetimes": 0.34 }
@@ -217,6 +224,27 @@ Fields that must exist in the schema now even though nothing writes them yet, to
 
 ```json
 "irt": { "difficulty": null, "discrimination": null, "guessing": null }
+```
+
+## Family-validation fields (`task.toml`)
+
+Referenced across [02-task-format.md](02-task-format.md) and [03-oracle.md](03-oracle.md); recorded
+here so the schema stops drifting behind the prose.
+
+```toml
+min_instance_distance   = 0.25    # prompt+skeleton, parametric families
+min_reference_distance  = 0.20    # reference impl, secondary
+min_transform_jaccard   = 0.50    # transform set, compositional families
+forbidden_calls         = []      # specific-API constraints only, never an allocation proxy
+[constraint.allocation] max_allocs = "reference"
+[quality.perf]          max_ratio  = 2.0
+```
+
+## Segment fields
+
+```json
+{ "exit_reason": "max_duration" }   // max_duration | until_time | sigint | battery
+                                    // | thermal | crash | complete | aborted
 ```
 
 Per-family IRT parameters, populated by `rustybench calibrate-suite` once enough submissions exist, and used for adaptive item allocation. See [07-statistics.md](07-statistics.md).

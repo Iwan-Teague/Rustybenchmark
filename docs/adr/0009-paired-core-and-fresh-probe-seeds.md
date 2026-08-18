@@ -68,6 +68,13 @@ Both sets draw from the same families with the same seed-space, so under honest 
 
 - Epoch seeds are effectively public within the epoch. A determined attacker can precompute the core set for the current epoch — and will be caught by the probe only if they do not also solve the probe. Epoch rotation remains necessary; this does not replace it.
 - The probe costs ~15% of every run and produces no score.
+- **The probe does not survive an adaptive adversary.** Round 4 simulated precomputation combined
+  with deliberate suppression of core units: at 20% precomputation the cheater retains **+9 to +10
+  points at 0% detection**. Family-aggregate pairing and probe/core indistinguishability were both
+  tested and both failed. The ratio is structural — the cheat pays off across 1088 scored units
+  while the detector observes 163 family-level pairs, so hiding is ~6.7× cheaper than the gain.
+  **The probe is demoted to a screening test; seed secrecy is the primary control.** See
+  [REVIEW-4.md](../REVIEW-4.md) R4-S1 and R4-S2.
 - **The detector has an irreducible sensitivity floor, and it must be published.** Even at 50% probe
   share the mean comparison bottoms out near 8 points and the sign test near 4. **Inflation below
   roughly 4–5 points is undetectable at any probe size we can afford.** The probe is a screening test

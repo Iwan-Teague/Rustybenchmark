@@ -51,10 +51,22 @@ The **core** is identical for every submitter in the epoch, which is what makes 
 The **probe** uses a per-batch nonce that did not exist before the request, so precomputed or binary-embedded solutions cannot apply to it. It is a **detector**, not a score:
 
 ```
-precompute_signal = core_score − probe_score
+precompute_signal = sign_test(family-paired core-vs-probe discordance)
 ```
 
-Under honest execution the two agree within sampling error, because both draw from the same families and seed space. A submission whose probe score falls materially below its core score did not earn the core score honestly. A cheater must now solve the probe legitimately *and* match their own inflated core score — self-defeating.
+Under honest execution the discordance is symmetric. Precomputation makes it one-directional.
+
+**The probe is a screening test, not a control, and its failure mode is measured.** An adversary who
+precomputes *and then deliberately fails core units they could have passed* rebalances the
+discordance and becomes invisible: at 20% precomputation, simulation shows **+9 to +10 points of
+inflation retained at 0% detection**. Neither family-aggregate pairing nor probe/core
+indistinguishability fixes it. The reason is structural — the cheat pays off across 1088 core units
+while the detector observes 163 family-level pairs, so hiding is ~6.7× cheaper than the gain, and no
+choice of test statistic changes that ratio.
+
+**The primary control against precomputation is therefore seed secrecy** (see below), not the probe.
+The probe catches unsophisticated precomputation and nothing more. See [REVIEW-4.md](REVIEW-4.md)
+R4-S1.
 
 Combined with T1 replay this gives: *the answers are right* (replay), and *they were not prepared in advance* (probe gap).
 
@@ -76,6 +88,22 @@ client: may not request batch k+1 before submitting batch k
 Precomputation exposure is bounded to one batch. Batches compose freely with execution segments — see [09-resume-and-checkpointing.md](09-resume-and-checkpointing.md).
 
 Trade-off: T2 requires network access *between* batches. The sandbox still denies network *during* every unit. Fully offline runs are possible but are capped at T0/T1.
+
+### Seed secrecy — the primary precomputation control
+
+Pairing requires every submitter in an epoch to run the **identical core seed set**. That set is
+therefore the single most valuable thing an attacker can obtain, and R4-S1 establishes that the
+probe cannot protect it.
+
+- Core seeds are **not published while the epoch is open**.
+- The public dump for epoch *N* is released when epoch *N* closes, at the start of epoch *N+1*.
+- Seeds are never reused across epochs, so a published set has no forward value.
+- Independent re-derivation of the leaderboard remains fully possible, delayed by one epoch.
+
+**Residual threat, stated plainly:** a submitter who has already run holds the seeds and can leak
+them to a confederate inside the same epoch. Against that the remaining defences are the probe
+(weak), canary cross-screening, and T3 audit. This limitation belongs on the public methodology page,
+not buried here.
 
 ### T3 — Audited
 
