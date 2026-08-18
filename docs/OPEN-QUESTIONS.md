@@ -4,13 +4,36 @@ Unresolved as of 2026-08-17. Each needs a decision before the phase that depends
 
 ---
 
-## Q1 — License
+## Q1 — License · **DECIDED (harness), OPEN (mined corpus)**
 
 **Blocks:** first public commit.
 
 Generators must be public for the benchmark to be credible, and the raw corpus must be publishable. Candidates: Apache-2.0, MIT/Apache dual (Rust ecosystem norm), or a permissive code license with the task corpus under CC-BY.
 
 Consideration: do we want to discourage the corpus being used as *training data*? A license cannot really prevent it, and a restrictive license would undercut the "publish everything" integrity argument. Probably dual MIT/Apache-2.0 with a stated norm rather than a legal restriction.
+
+
+**Decided 2026-08-18: [PolyForm Noncommercial License 1.0.0](../LICENSE.md)** for the harness and the
+synthetic task corpus. Noncommercial use is free; commercial use requires a separate licence.
+
+This overrides the reasoning above, which leaned toward permissive dual MIT/Apache. The concern
+recorded there still stands and is answered rather than dismissed: a restrictive licence must not
+undercut the publish-everything integrity argument. It does not, because **re-deriving the
+leaderboard from the published dump is not a licensed use of the software** — reading published data
+and publishing analysis of it are unrestricted. What the licence does cost is internal commercial
+evaluation, which is a real segment of the likely audience. That trade was made deliberately.
+
+**Still open: the mined `wild` corpus.** Task families mined from third-party repositories carry
+those repositories' own licences (MIT, Apache-2.0, GPL, and others). Those cannot be relicensed as
+noncommercial, and GPL-derived material may not be redistributable alongside a noncommercial harness
+at all. Needs resolving before Phase 7, and possibly before any mined family is published:
+
+- per-source attribution and licence tracking in the family manifest
+- an allowlist of source licences compatible with redistribution
+- possibly distributing mined families as *fetch recipes* (repo + commit + patch) rather than as
+  copied source, which sidesteps redistribution entirely
+
+Tracked separately as **Q21**.
 
 ---
 
@@ -267,3 +290,13 @@ Open: is per-submitter seed **salting** possible while preserving enough pairing
 **Blocks:** Phase 6. Raised by [REVIEW-4.md](REVIEW-4.md) round 5 scope.
 
 R4-S1 showed a fresh-subset detector is defeated by an adversary willing to throw units. The plausibility checks in [10-integrity.md](10-integrity.md) — throughput consistency, memory physics, thermal signature, error-code fingerprint, canary cross-screening — have **never been modelled adversarially at all**. They were designed against carelessness, not against someone optimising against them.
+
+---
+
+## Q21 — Licence compatibility for the mined `wild` corpus
+
+**Blocks:** publishing any mined family (Phase 7, possibly earlier).
+
+The harness is PolyForm Noncommercial 1.0.0 (Q1). Mined task families derive from third-party repositories under their own licences and cannot be relicensed. GPL-derived material in particular may not be redistributable alongside a noncommercial harness.
+
+Options: an allowlist of permissively licensed sources only; per-family attribution and licence metadata; or distributing mined families as **fetch recipes** (repo URL + commit SHA + patch) so no third-party source is redistributed at all. The last is the cleanest and also reduces the corpus size, at the cost of requiring network access at family-materialisation time — which conflicts with the offline sandbox guarantee in [08-run-protocol.md](08-run-protocol.md) unless fetching happens during preflight.

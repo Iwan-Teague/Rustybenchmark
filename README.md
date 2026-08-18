@@ -53,4 +53,19 @@ Static coding benchmarks rot: models memorise them. Rustybenchmark ships **gener
 
 ## License
 
-TBD — see [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md).
+[PolyForm Noncommercial License 1.0.0](LICENSE.md) — free for any noncommercial purpose, including
+personal, research, educational, and charitable use. Commercial use requires a separate licence;
+open an issue.
+
+Two things this deliberately does **not** restrict, because the benchmark's credibility depends on
+them:
+
+- **Reading, auditing, and re-deriving results.** Anyone may download the published corpus and
+  recompute the leaderboard. That is the strongest integrity control the project has
+  ([docs/10-integrity.md](docs/10-integrity.md)) and no licence term is allowed to weaken it.
+- **Publishing findings.** Independent analysis of published data is not a licensed use of the
+  software and is not restricted.
+
+**The `wild` mined corpus is not covered by this licence.** Those task families derive from
+third-party repositories under their own licences, which cannot be relicensed. They will carry
+per-source attribution and terms, tracked in [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) Q1.
