@@ -76,7 +76,7 @@ Combined with T1 replay this gives: *the answers are right* (replay), and *they 
 
 #### Batched issuance (required for long runs)
 
-A `deep` suite takes ~39 hours; it cannot sit inside a short anti-precomputation window. So the nonce is issued per batch, not per run:
+A `deep` suite takes ~44.5 hours; it cannot sit inside a short anti-precomputation window. So the nonce is issued per batch, not per run:
 
 ```
 client: POST /challenge/batch { run_id, batch_index }
@@ -85,11 +85,29 @@ client: executes the batch, submits results
 client: may not request batch k+1 before submitting batch k
 ```
 
-Precomputation exposure is bounded to one batch. Batches compose freely with execution segments — see [09-resume-and-checkpointing.md](09-resume-and-checkpointing.md).
+~~Precomputation exposure is bounded to one batch.~~ **This claim is false and is retracted.** Batch
+nonces derive **probe** seeds only ([ADR-0009](adr/0009-paired-core-and-fresh-probe-seeds.md)); the
+85% of units that are *scored* derive from `epoch_seed`, which is written into `plan.json` before the
+first unit runs. **Core precomputation exposure is unbounded** — see [REVIEW-5.md](REVIEW-5.md) R5-S2.
+A completed 60-unit `smoke` run yields every `deep` seed for the epoch.
+
+Batches compose freely with execution segments — see [09-resume-and-checkpointing.md](09-resume-and-checkpointing.md).
 
 Trade-off: T2 requires network access *between* batches. The sandbox still denies network *during* every unit. Fully offline runs are possible but are capped at T0/T1.
 
 ### Seed secrecy — the primary precomputation control
+
+> **BLOCKED — this control does not currently work.** It presumes the seed set can be kept from an
+> attacker. It cannot: `plan.json` contains `epoch_seed` and all 1088 core seeds before the first
+> unit executes, the server surface has **no authentication and no submitter identity**, and no gate
+> anywhere bounds elapsed time between planning and submission. Secrecy protects the seed set from
+> third parties and provides **zero** protection against the party holding it, which is every
+> submitter. See [REVIEW-5.md](REVIEW-5.md) R5-S2.
+>
+> Prerequisites before this section describes reality: (a) authenticated submitters, (b) either
+> fresh per-submitter seeds — viable if [R5-S1](REVIEW-5.md)'s ρ measurement permits family-level
+> pairing — or server-issued rendered instances with seeds never leaving the server, and (c) a
+> monotone-progress rule with published `plan_frozen_at` → `submitted_at` elapsed on every row.
 
 Pairing requires every submitter in an epoch to run the **identical core seed set**. That set is
 therefore the single most valuable thing an attacker can obtain, and R4-S1 establishes that the

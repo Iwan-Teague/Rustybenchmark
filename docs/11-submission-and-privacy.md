@@ -18,13 +18,15 @@ Auto-upload is the right product idea. It is also an outward-facing action carry
 ### Always (public leaderboard)
 
 ```
-run_id, epoch, challenge/batch nonces, suite, completeness, tier
+run_id, epoch, suite, completeness, tier          (nonces withheld until epoch close)
 suite_hash, generator_commit, harness_version
 model: name, quant, backend, backend_version, ctx, ngl, sampling config
 exec_class, offload_ratio, kv_cache_location
 hw_class (bucketed), cpu_class, mem_bandwidth_class, unified_memory, chassis, power_source
 calibration: pp512, tg128, sustained delta, per-segment values
-per-unit: task_id, seed, oracle vector, error_codes, failure_class, timings, token counts
+per-unit: task_id, oracle vector, error_codes, failure_class, timings, token counts
+          (seed and batch_nonce are WITHHELD until the epoch closes -- R5-S7 found the R4-S2
+           fix applied to the dump section below but not to this upload list)
 aggregates: capability_score, category scores, CIs, effective N
 segments: count, exit reasons, stability flags
 ```

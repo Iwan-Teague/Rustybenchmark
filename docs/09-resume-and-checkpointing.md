@@ -1,6 +1,6 @@
 # 09 — Resume and checkpointing
 
-The `deep` suite takes ~39 hours at 20 tok/s. Nobody has 39 uninterrupted hours. A run must survive being executed in ninety-minute evening slices across two weeks, and must survive crashes, kernel panics, and lid closes without corrupting its own results.
+The `deep` suite takes ~44.5 hours at 20 tok/s. Nobody has 39 uninterrupted hours. A run must survive being executed in ninety-minute evening slices across two weeks, and must survive crashes, kernel panics, and lid closes without corrupting its own results.
 
 ## The property that makes this easy
 
@@ -43,7 +43,9 @@ macOS uses `~/Library/Application Support/Rustybenchmark/runs/`; Windows uses `%
   "plan_hash": "blake3:...",          // covers core units + probe SLOT STRUCTURE
   "suite": "deep",
   "epoch": "2026-08",
-  "epoch_seed": "...",                // public, shared by all submitters -> pairing
+  "epoch_seed": "...",                // SECRET until the epoch closes. Shared across submitters
+                                      // for pairing, but see REVIEW-5.md R5-S2: writing it here hands
+                                      // every submitter the master key to all 1088 core seeds at t=0.
   "core": [
     { "index": 0, "unit_id": "...", "task_id": "borrowck/split-mut-window", "seed": 8412739123 },
     { "index": 1, "unit_id": "...", "task_id": "traits/blanket-coherence",  "seed": 1177340022 }
@@ -191,11 +193,11 @@ rustybench status 01K3F...
   stability tg128 across segments: 41.2 / 40.8 / 38.1 / 41.2  -> +/- 4.0%  OK
 ```
 
-The partial score is computed and shown at every status check. Its CI is honest about the reduced N, and the report is clearly marked partial. Being able to see a converging estimate mid-run is a large part of what makes a 39-hour benchmark bearable to run.
+The partial score is computed and shown at every status check. Its CI is honest about the reduced N, and the report is clearly marked partial. Being able to see a converging estimate mid-run is a large part of what makes a 44.5-hour benchmark bearable to run.
 
 ## Interaction with challenge windows
 
-A T2 challenged run cannot fit a 39-hour execution inside a six-hour anti-precomputation window. Resolved by **batched challenge issuance** rather than one long window:
+A T2 challenged run cannot fit a 44.5-hour execution inside a six-hour anti-precomputation window. Resolved by **batched challenge issuance** rather than one long window:
 
 - The client requests seed batch *k* (e.g. 50 units).
 - The server returns `{batch_nonce, expires_at}` with a short window (hours).

@@ -300,3 +300,67 @@ R4-S1 showed a fresh-subset detector is defeated by an adversary willing to thro
 The harness is PolyForm Noncommercial 1.0.0 (Q1). Mined task families derive from third-party repositories under their own licences and cannot be relicensed. GPL-derived material in particular may not be redistributable alongside a noncommercial harness.
 
 Options: an allowlist of permissively licensed sources only; per-family attribution and licence metadata; or distributing mined families as **fetch recipes** (repo URL + commit SHA + patch) so no third-party source is redistributed at all. The last is the cleanest and also reduces the corpus size, at the cost of requiring network access at family-materialisation time — which conflicts with the offline sandbox guarantee in [08-run-protocol.md](08-run-protocol.md) unless fetching happens during preflight.
+
+---
+
+## Q22 — Measure ρ, the model × instance interaction · **BLOCKING**
+
+**Blocks:** every secrecy decision, and Q13/Q16/Q19 are all contingent on it. Raised by [REVIEW-5.md](REVIEW-5.md) R5-S1.
+
+ρ is the share of instance difficulty that is **model-specific** — whether a given instance is equally hard for two different models, or differentially hard. Round 4's R4-S3 implicitly assumed **ρ = 0** and concluded seed-level pairing beats family-level pairing by 82 percentage points. At ρ = 0.5 the gap is **6.8pp**; at ρ = 0.75 it is **0.7pp**. ρ = 0 is physically implausible, and even ρ = 0.1 collapses seed-pairing's own power from 100% to 47%.
+
+**Measurement:** run two models over the same seed set in Phase 3.5 and decompose instance-level variance into shared and model-specific components. Cheap — the runs are already planned.
+
+**Why it is the highest-value question in the corpus:** if ρ ≥ 0.5, family-level pairing is viable, every submitter gets fresh seeds, precomputation becomes impossible by construction, and nine of round 5's twenty-one severe findings plus Q13, Q16 and Q19 dissolve at once.
+
+**No further engineering on the probe, batch nonces, or seed secrecy until this number exists.**
+
+---
+
+## Q23 — Authentication and submitter identity · **BLOCKING secrecy**
+
+**Blocks:** Phase 6. Raised by [REVIEW-5.md](REVIEW-5.md) R5-S2.
+
+The server surface has no authentication, no accounts, and no submitter identity; the only identifier is a client-minted `machine_uuid`. Consequences: the "secret" `epoch_seed` is served by an unauthenticated endpoint to anyone who asks; rate limits bind to a value the client mints; and Q19's salting remedy has nothing to salt against.
+
+Contingent on Q22 — if fresh per-submitter seeds become viable, the requirement weakens considerably but does not vanish (rate limiting and T3 audit still want identity).
+
+---
+
+## Q24 — Shape-count audit, and re-derive ADR-0008 from shapes
+
+**Blocks:** corpus scale-up. Raised by [REVIEW-5.md](REVIEW-5.md) R5-S3.
+
+Clustering is two-level (shape → family → seed); the statistics are one-level. The precision ceiling is governed by **shape** count, not family count, so **no core category reaches the claimed ±10.7%**, and below ~13 shapes the target is unreachable at any family budget.
+
+Needed: an enumerated shape audit per category; a two-level bootstrap; a corrected gate G2 that measures the shape component (the current within-family ICC is invariant to the defect); and re-derived family budgets. Note `idiom-refactor`'s clustering is **crossed, not nested**, so no nested bootstrap is valid for it — it may need a different estimator or a different category design.
+
+---
+
+## Q25 — Does the `wild` mined suite survive at all?
+
+**Blocks:** Phase 7. Raised by [REVIEW-5.md](REVIEW-5.md) R5-S4, and interacts with Q21.
+
+Eleven findings, all surviving verification. Yield collapses at the stated repo size; the size cap is inconsistent across five documents and the answer flips on it; **for 62–69% of qualifying crates the mined oracle lives inside a file the model is asked to edit**, defeating oracle isolation; both of ADR-0002's validity claims fail under simulation; and the purely-synthetic escape-hatch score ADR-0002 promises is not actually published anywhere.
+
+Honest options: drop the `wild` suite; or restrict to permissively-licensed sources with the oracle mechanically extracted to a separate file, and accept a much smaller family count. Deciding to drop it would also close Q21.
+
+---
+
+## Q26 — Redesign or delete the plausibility checks
+
+**Blocks:** Phase 6. Supersedes Q20, which is now answered: they do not survive.
+
+The suite is **invariant under uniform time rescaling** and has no external anchor. Error-code fingerprinting is under deterministic, zero-cost adversary control. The thermal check contradicts two of the design's own thresholds and would flag **33–64% of honest laptop runs**. Five of six checks have no threshold, no test statistic and no reference data. **50–98% of honest submissions raise at least one flag**, at a flag precision near zero, against a 1 FTE project.
+
+A check that fires on most honest users and none of the adversarial ones is worse than no check. Either give each one an external anchor and a stated threshold with a measured false-positive rate, or delete it and say the hardware numbers are unverified.
+
+---
+
+## Q27 — Prompt-prefix caching and cross-backend timing comparability
+
+**Blocks:** any published throughput number. Raised by [REVIEW-5.md](REVIEW-5.md) R5-S6.
+
+Prefix caching is on by default in the named backends, is unrecorded, and inflates `throughput_score` by **8–139%**. Backends cache differently, so cross-backend comparison is invalid as specified. Separately, `prefill_ms`/`gen_ms` cannot be obtained over the OpenAI-compatible surface for three of the four named backends, which silently disables the only decode-side plausibility check.
+
+Options: require cache-disabling flags where the backend supports them and record the setting; or abandon cross-backend throughput comparison and scope `throughput_score` to within-backend only.

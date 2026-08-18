@@ -210,6 +210,7 @@ Every one of these is a hard gate. A family that fails any of them does not ship
 | Returning the skeleton unchanged fails | No copy-through pass |
 | Pairwise prompt+skeleton distance ≥ `min_instance_distance` | Instances are not renamed twins *from the model's point of view* |
 | Pairwise reference distance ≥ `min_reference_distance` | Secondary structural check |
+| **Pairwise transform-set Jaccard ≥ `min_transform_jaccard`** (compositional families) | R4-S4's primary anti-twin gate. It was declared in the manifest and the schema but never added to this list, so nothing enforced it — [REVIEW-5.md](REVIEW-5.md) R5-S7 |
 | Reference compiles clean under the family's own `constraints.toml` | The constraints are satisfiable |
 | Generation is deterministic: same seed → byte-identical instance | Resume and replay depend on this |
 | Prompt contains exactly one canary, and no oracle content | No leakage into the model's view |

@@ -47,7 +47,7 @@ also record: peak accelerator memory, peak host RSS,
 
 ### The sustained phase — our addition
 
-Standard tooling stops at the short burst. That hides the fact that matters most for a 39-hour benchmark run.
+Standard tooling stops at the short burst. That hides the fact that matters most for a 44.5-hour benchmark run.
 
 ```
 sustained:   10 minutes of bench-shaped load
@@ -65,7 +65,7 @@ Thermal throttling alone swings llama.cpp results **12–18%** between cold and 
 
 A run that spans multiple sessions (see [09-resume-and-checkpointing.md](09-resume-and-checkpointing.md)) recalibrates at the start of every segment. Thermal and power state do not persist across a lid close. Timing metrics aggregate across segments with segment tags, and the run reports inter-segment calibration variance.
 
-But full calibration is ~15 minutes. In the ninety-minute evening slices this project explicitly sells, that is **17% overhead** — roughly 6.5 hours of pure measurement across a 39-hour suite. So calibration is tiered:
+But full calibration is ~15 minutes. In the ninety-minute evening slices this project explicitly sells, that is **17% overhead** — roughly 6.5 hours of pure measurement across a 44.5-hour suite. So calibration is tiered:
 
 | Segment | Calibration | Cost |
 |---|---|---|

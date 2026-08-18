@@ -50,7 +50,7 @@ baseline, 6.3 pts at 50%). A cheater precomputing 10% of core gains ~6 points â€
 mean comparison, caught by the sign test.
 
 ```
-precompute_signal = core_score âˆ’ probe_score
+precompute_signal = sign_test(family-paired core-vs-probe discordance)   # R3-S3; NOT a mean comparison
 ```
 
 Both sets draw from the same families with the same seed-space, so under honest execution the two scores should agree within sampling error. The gap is the signal.
