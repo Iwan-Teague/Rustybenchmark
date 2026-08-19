@@ -55,6 +55,23 @@ struct TaskManifest {
     kind: String,
     answer_path: String,
     system_prompt: String,
+    #[serde(default)]
+    weights: Option<Weights>,
+    #[serde(default)]
+    oracle: Option<OracleCfg>,
+}
+
+#[derive(Deserialize)]
+struct Weights {
+    behavior: f32,
+    constraint: f32,
+    quality: f32,
+}
+
+#[derive(Deserialize, Default)]
+struct OracleCfg {
+    behavior_test: Option<String>,
+    alloc_test: Option<String>,
 }
 
 /// One journal line — a subset of docs/12-schemas.md journal.jsonl.
@@ -155,14 +172,25 @@ fn run(
     }
     std::fs::create_dir_all(&ws)?;
 
+    let weights = manifest
+        .weights
+        .as_ref()
+        .map(|w| OracleWeights {
+            behavior: w.behavior,
+            constraint: w.constraint,
+            quality: w.quality,
+        })
+        .unwrap_or_default();
+    let ocfg = manifest.oracle.unwrap_or_default();
+    let spec = bench_oracle::GradeSpec {
+        answer_path: Path::new(&manifest.answer_path),
+        weights: &weights,
+        behavior_test: ocfg.behavior_test.as_deref(),
+        alloc_test: ocfg.alloc_test.as_deref(),
+    };
+
     let grade_start = std::time::Instant::now();
-    let vector = bench_oracle::grade(
-        &instance,
-        &completion.text,
-        Path::new(&manifest.answer_path),
-        &OracleWeights::default(),
-        &ws,
-    )?;
+    let vector = bench_oracle::grade(&instance, &completion.text, &spec, &ws)?;
     let grade_ms = grade_start.elapsed().as_millis() as u64;
 
     // --- write the journal line ---
@@ -191,11 +219,12 @@ fn run(
     append_journal(out, &line)?;
 
     println!(
-        "  score {:.3}  apply={} compile={} behavior={:?} failure={:?}",
+        "  score {:.3}  apply={} compile={} behavior={:?} constraint={:?} failure={:?}",
         vector.score,
         vector.apply_ok,
         vector.compile_ok,
         vector.behavior.score,
+        vector.constraint.score,
         vector.failure_class
     );
     if !vector.error_codes.is_empty() {

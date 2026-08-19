@@ -12,8 +12,8 @@
 //! through `run_cargo`, so P1 has exactly one place to harden.
 
 use bench_core::{
-    classify_error_codes, composite_score, BehaviorScore, FailureClass, Instance, OracleVector,
-    OracleWeights,
+    classify_error_codes, composite_score, BehaviorScore, ConstraintScore, FailureClass, Instance,
+    OracleVector, OracleWeights,
 };
 use std::path::Path;
 use std::process::Command;
@@ -26,6 +26,20 @@ pub enum OracleError {
     DirtyWorkspace(String),
 }
 
+/// Everything the oracle needs beyond the instance and the response. Grows one
+/// field per layer as the oracle deepens.
+pub struct GradeSpec<'a> {
+    /// Where in the crate the model's answer is written, e.g. `src/lib.rs`.
+    pub answer_path: &'a Path,
+    pub weights: &'a OracleWeights,
+    /// The `cargo test --test <name>` target for the L2 behaviour tests. `None`
+    /// runs every test, which is fine when the task has no separate L3 target.
+    pub behavior_test: Option<&'a str>,
+    /// The `cargo test --test <name>` target carrying the L3 allocation
+    /// instrumentation. `None` skips the constraint layer.
+    pub alloc_test: Option<&'a str>,
+}
+
 /// Grade one model response for one instance.
 ///
 /// `workspace` must be an existing empty directory; the oracle materialises the
@@ -34,8 +48,7 @@ pub enum OracleError {
 pub fn grade(
     instance: &Instance,
     response: &str,
-    answer_path: &Path,
-    weights: &OracleWeights,
+    spec: &GradeSpec,
     workspace: &Path,
 ) -> Result<OracleVector, OracleError> {
     if workspace.read_dir()?.next().is_some() {
@@ -53,7 +66,7 @@ pub fn grade(
     for (rel, contents) in &instance.files {
         write_under(workspace, rel, contents)?;
     }
-    write_under(workspace, answer_path, &code)?;
+    write_under(workspace, spec.answer_path, &code)?;
     for (rel, contents) in &instance.hidden {
         write_under(workspace, rel, contents)?;
     }
@@ -71,15 +84,22 @@ pub fn grade(
             error_codes,
             warn_count,
             behavior: BehaviorScore::default(),
+            constraint: ConstraintScore::default(),
             score: 0.0,
             failure_class,
         };
-        v.score = composite_score(&v, weights);
+        v.score = composite_score(&v, spec.weights);
         return Ok(v);
     }
 
-    // ---- L2: unit ----
-    let test = run_cargo(workspace, &["test", "--offline", "--quiet"])?;
+    // ---- L2: behaviour ----
+    let mut targs = vec!["test"];
+    if let Some(name) = spec.behavior_test {
+        targs.push("--test");
+        targs.push(name);
+    }
+    targs.extend_from_slice(&["--offline", "--quiet"]);
+    let test = run_cargo(workspace, &targs)?;
     let unit = parse_test_summary(&test.stdout).or_else(|| parse_test_summary(&test.stderr));
     let unit_score = unit.map(|(passed, total)| {
         if total == 0 {
@@ -95,9 +115,38 @@ pub fn grade(
         differential: None,
         score: unit_score,
     };
-    let failure_class = match unit_score {
-        Some(s) if s >= 1.0 => FailureClass::None,
-        _ => FailureClass::Logic,
+
+    // ---- L3: constraint (allocation) ----
+    let mut constraint = ConstraintScore::default();
+    if let Some(name) = spec.alloc_test {
+        let out = run_cargo(workspace, &["test", "--test", name, "--offline", "--quiet"])?;
+        match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
+            Some((passed, total)) if total > 0 => {
+                let ok = passed == total;
+                constraint.alloc_ok = Some(ok);
+                if !ok {
+                    constraint
+                        .violations
+                        .push("alloc: hot path allocated".into());
+                }
+            }
+            // The allocation target failed to build or ran nothing — we could
+            // not measure. Record it rather than guessing a verdict.
+            _ => constraint
+                .violations
+                .push("alloc: test target did not run".into()),
+        }
+        constraint.recompute();
+    }
+
+    // Failure class, most-specific first: compiled, so it is a behaviour, then
+    // constraint, then clean.
+    let failure_class = if unit_score.map(|s| s < 1.0).unwrap_or(true) {
+        FailureClass::Logic
+    } else if constraint.score.map(|s| s < 1.0).unwrap_or(false) {
+        FailureClass::Constraint
+    } else {
+        FailureClass::None
     };
 
     let mut v = OracleVector {
@@ -106,10 +155,11 @@ pub fn grade(
         error_codes,
         warn_count,
         behavior,
+        constraint,
         score: 0.0,
         failure_class,
     };
-    v.score = composite_score(&v, weights);
+    v.score = composite_score(&v, spec.weights);
     Ok(v)
 }
 

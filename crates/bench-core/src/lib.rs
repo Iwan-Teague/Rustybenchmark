@@ -5,10 +5,11 @@
 //! invariant (docs/13-architecture.md) is what keeps the type system coherent
 //! as the leaf crates grow.
 //!
-//! Scope for the P0 spine: identifiers, the instance a model is graded on, the
-//! layered oracle *vector*, the scoring arithmetic, and the rustc-error-code →
-//! `FailureClass` lookup. Constraint (L3) and quality (L4) layers are declared
-//! in the vector but not yet populated — that is P2.
+//! Scope so far: identifiers, the instance a model is graded on, the layered
+//! oracle *vector*, the scoring arithmetic, the rustc-error-code →
+//! `FailureClass` lookup, and per-layer weight renormalisation. L2 behaviour and
+//! the L3 allocation constraint are populated; L2 property/differential and L4
+//! quality are declared but not yet filled.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -75,8 +76,8 @@ pub enum TaskKind {
 }
 
 /// Per-category oracle weights. Global defaults are wrong for several
-/// categories (docs/04-categories.md); they are overridable per family. Only
-/// `behavior` is populated in the P0 spine.
+/// categories (docs/04-categories.md); they are overridable per family
+/// (`[weights]` in task.toml).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OracleWeights {
     pub behavior: f32,
@@ -128,6 +129,42 @@ pub struct BehaviorScore {
     pub score: Option<f32>,
 }
 
+/// Constraint layer (L3). Each check is optional — it contributes to the layer
+/// score only when it ran. The layer score is the mean of the boolean checks
+/// that produced a verdict. Allocation is the first check implemented; clippy,
+/// fmt and `syn`-based checks follow.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConstraintScore {
+    /// The hot path stayed within its allocation budget (docs/03-oracle.md:
+    /// allocation is measured, not name-blacklisted).
+    pub alloc_ok: Option<bool>,
+    pub clippy_clean: Option<bool>,
+    pub fmt_ok: Option<bool>,
+    pub unsafe_blocks: Option<u32>,
+    /// Human-readable violations, e.g. `"alloc: hot path allocated"`.
+    pub violations: Vec<String>,
+    /// Mean of the boolean checks that ran, in [0, 1]; `None` if none ran.
+    pub score: Option<f32>,
+}
+
+impl ConstraintScore {
+    /// Recompute `score` as the mean of the boolean checks present. `unsafe_blocks`
+    /// is recorded but not folded in here — a task that forbids `unsafe` expresses
+    /// that as its own check in a later increment.
+    pub fn recompute(&mut self) {
+        let mut sum = 0.0f32;
+        let mut n = 0u32;
+        for b in [self.alloc_ok, self.clippy_clean, self.fmt_ok]
+            .into_iter()
+            .flatten()
+        {
+            sum += if b { 1.0 } else { 0.0 };
+            n += 1;
+        }
+        self.score = (n > 0).then(|| sum / n as f32);
+    }
+}
+
 /// Derived from rustc error codes. This is the per-category diagnostic no
 /// general-purpose coding benchmark can produce (docs/03-oracle.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,8 +197,10 @@ pub struct OracleVector {
     pub compile_ok: bool,
     pub error_codes: Vec<String>,
     pub warn_count: u32,
-    // L2 behavior (0.70 weight by default)
+    // L2 behavior
     pub behavior: BehaviorScore,
+    // L3 constraint
+    pub constraint: ConstraintScore,
     // Composite in [0, 1]; 0.0 unless both gates pass.
     pub score: f32,
     pub failure_class: FailureClass,
@@ -176,6 +215,7 @@ impl OracleVector {
             error_codes: Vec::new(),
             warn_count: 0,
             behavior: BehaviorScore::default(),
+            constraint: ConstraintScore::default(),
             score: 0.0,
             failure_class: FailureClass::Other,
         }
@@ -189,24 +229,34 @@ impl OracleVector {
 /// The composite score, gated on apply + compile.
 ///
 /// ```text
-/// task_score = (apply_ok && compile_ok) ? w_b*behavior + w_c*constraint + w_q*quality : 0.0
+/// task_score = (apply_ok && compile_ok) ? Σ w_layer·score_layer / Σ w_layer : 0.0
 /// ```
 ///
-/// In the P0 spine only the behaviour layer is populated, so the constraint and
-/// quality terms contribute nothing and the behaviour weight is renormalised to
-/// carry the whole score. When L3/L4 arrive (P2) this becomes the full weighted
-/// sum without changing the gate.
+/// The sum runs over whichever layers actually produced a score, renormalised by
+/// their weights. So a task with no L3 constraint check scores purely on
+/// behaviour, and a constraint-dominant task (docs/04, `borrow-lifetimes`:
+/// behavior 0.35 / constraint 0.55) penalises a behaviourally-correct but
+/// allocation-heavy solution — the fix for REVIEW.md S6. Quality (L4) slots into
+/// the same sum when it arrives, without changing the gate.
 pub fn composite_score(v: &OracleVector, w: &OracleWeights) -> f32 {
     if !(v.apply_ok && v.compile_ok) {
         return 0.0;
     }
-    let b = v.behavior.score.unwrap_or(0.0);
-    // Renormalise over the layers that actually ran. Spine: behaviour only.
-    let present = w.behavior; // + w.constraint + w.quality once those land
-    if present <= f32::EPSILON {
+    let mut num = 0.0f32;
+    let mut den = 0.0f32;
+    if let Some(b) = v.behavior.score {
+        num += w.behavior * b;
+        den += w.behavior;
+    }
+    if let Some(c) = v.constraint.score {
+        num += w.constraint * c;
+        den += w.constraint;
+    }
+    // quality (L4) joins here in a later increment.
+    if den <= f32::EPSILON {
         return 0.0;
     }
-    (w.behavior * b / present).clamp(0.0, 1.0)
+    (num / den).clamp(0.0, 1.0)
 }
 
 /// Map rustc error codes to a `FailureClass`, most-specific first. When a unit
@@ -281,42 +331,76 @@ mod tests {
         assert_eq!(composite_score(&v, &OracleWeights::default()), 0.0);
     }
 
-    #[test]
-    fn passing_behavior_scores_full_when_gates_pass() {
-        let v = OracleVector {
+    fn vector(behavior: Option<f32>, constraint: Option<f32>) -> OracleVector {
+        let constraint_score = ConstraintScore {
+            alloc_ok: constraint.map(|s| s >= 1.0),
+            score: constraint,
+            ..Default::default()
+        };
+        OracleVector {
             apply_ok: true,
             compile_ok: true,
             error_codes: vec![],
             warn_count: 0,
             behavior: BehaviorScore {
-                unit: Some(1.0),
+                unit: behavior,
                 property: None,
                 differential: None,
-                score: Some(1.0),
+                score: behavior,
             },
+            constraint: constraint_score,
             score: 0.0,
             failure_class: FailureClass::None,
-        };
-        assert!((composite_score(&v, &OracleWeights::default()) - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn passing_behavior_scores_full_when_gates_pass() {
+        assert!(
+            (composite_score(&vector(Some(1.0), None), &OracleWeights::default()) - 1.0).abs()
+                < 1e-6
+        );
     }
 
     #[test]
     fn half_behavior_scores_half() {
-        let v = OracleVector {
-            apply_ok: true,
-            compile_ok: true,
-            error_codes: vec![],
-            warn_count: 0,
-            behavior: BehaviorScore {
-                unit: Some(0.5),
-                property: None,
-                differential: None,
-                score: Some(0.5),
-            },
-            score: 0.0,
-            failure_class: FailureClass::Logic,
+        assert!(
+            (composite_score(&vector(Some(0.5), None), &OracleWeights::default()) - 0.5).abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn constraint_dominant_weights_penalise_clone_everything() {
+        // A behaviourally-correct (1.0) but allocation-failing (0.0) solution
+        // under borrow-lifetimes weights (behavior 0.35 / constraint 0.55).
+        let w = OracleWeights {
+            behavior: 0.35,
+            constraint: 0.55,
+            quality: 0.10,
         };
-        assert!((composite_score(&v, &OracleWeights::default()) - 0.5).abs() < 1e-6);
+        let v = vector(Some(1.0), Some(0.0));
+        let s = composite_score(&v, &w);
+        // (0.35*1 + 0.55*0) / (0.35 + 0.55) = 0.389
+        assert!((s - 0.35 / 0.90).abs() < 1e-4, "got {s}");
+        // The same answer under behaviour-dominant defaults scores much higher
+        // (0.70/0.90 = 0.778): constraint weighting roughly halves it.
+        let behav_dom = composite_score(&v, &OracleWeights::default());
+        assert!(
+            behav_dom > s + 0.3,
+            "constraint weighting must move the score: {behav_dom} vs {s}"
+        );
+    }
+
+    #[test]
+    fn constraint_score_is_mean_of_present_checks() {
+        let mut c = ConstraintScore {
+            alloc_ok: Some(true),
+            fmt_ok: Some(false),
+            ..Default::default()
+        };
+        c.recompute();
+        assert_eq!(c.score, Some(0.5));
     }
 
     #[test]

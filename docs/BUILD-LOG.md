@@ -1,0 +1,91 @@
+# Build log
+
+A running record of what has actually been built, verified, and decided —
+distinct from the design docs (which specify the target) and the review rounds
+(which attack it). One entry per meaningful increment. Newest first.
+
+The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
+
+---
+
+## 2026-08-19 · P2 (partial) — L3 constraint layer: allocation instrumentation
+
+**What.** The first L3 constraint check, and per-category oracle weights, wired
+through `bench-core` → `bench-oracle` → `bench-cli`.
+
+**The mechanism.** Allocation is *measured*, not name-blacklisted. Round 5
+established that `forbidden_calls = ["clone", "to_vec"]` cannot work — there are
+unboundedly many ways to copy data. Instead the hidden oracle ships a test
+target (`tests/alloc.rs`) carrying a counting `#[global_allocator]`; it snapshots
+the allocation count, calls the function under test, and asserts zero
+allocations in the hot path. A clone-everything solution allocates and fails it.
+Because each integration test is its own binary, the allocator in `alloc.rs`
+governs only that target and does not perturb the behaviour tests.
+
+**Per-category weights.** `composite_score` now renormalises over whichever
+layers produced a score, so `borrow-lifetimes` can be constraint-dominant
+(behavior 0.35 / constraint 0.55) per docs/04. That is the fix for REVIEW.md S6:
+under the old behaviour-dominant default a clone-everything solution scored
+near-identically to a proper one.
+
+**Verified** on the frozen borrow task, four model responses, weights
+behavior 0.35 / constraint 0.55 (measured end to end against a mock):
+
+| response | apply | compile | behavior | constraint(alloc) | score | failure_class |
+|---|---|---|---|---|---|---|
+| correct (`chunks_exact_mut`) | ✓ | ✓ | 1.0 | ok | **1.000** | none |
+| clone-everything (`to_vec` + copy back) | ✓ | ✓ | 1.0 | **fail** | **0.389** | constraint |
+| second mutable borrow | ✓ | ✗ (E0499) | — | — | **0.000** | borrowck |
+| whole-slice reverse | ✓ | ✓ | 0.2 | ok | **0.689** | logic |
+
+The clone-everything row is the point: behaviourally correct, all five
+correctness tests pass, but the allocation it performs is now visible in the
+score. Under the behaviour-dominant default weights the same answer scores
+**0.778**; constraint-dominant weighting roughly halves it to **0.389**. That is
+the REVIEW.md S6 fix, demonstrated with real toolchain execution.
+
+**Observed tension, logged rather than hidden.** The logically-wrong
+whole-slice-reverse (0.689) now *outscores* the behaviourally-correct
+clone-everything (0.389). That is a genuine consequence of constraint-dominant
+weighting: whole-slice-reverse manipulates in place (0 alloc → full 0.55
+constraint credit) while clone-everything sidesteps the borrow skill entirely
+(0 constraint credit) despite passing correctness. Whether "wrong but in-place"
+should beat "right but allocating" on a *borrow-checker* skill probe is a real
+design question, not a bug in the machinery — the composite is doing exactly
+what the weights say. It bears on the pass-predicate decision (Q28) and on
+whether behaviour should be a floor rather than a weighted term. Flagged for
+P2-proper; the roadmap's "near zero" for clone-everything is reached more fully
+once that is settled and/or L4 quality is present.
+
+**Deferred within L3:** clippy, fmt, and `syn`-based unsafe/forbidden-path
+checks. Allocation was done first because it is the flagship and hits the
+exit criterion; the others are cheap follow-ups.
+
+---
+
+## 2026-08-19 · P0 — the spine
+
+**What.** `rustybench run` end to end: load a frozen task → call an
+OpenAI-compatible model → grade with the real `cargo`/`rustc` toolchain →
+append a scored JSONL journal line.
+
+**Crates.** `bench-core` (pure types + scoring + rustc-code→`FailureClass`),
+`bench-model` (blocking `/v1/chat/completions`), `bench-oracle` (L0 apply, L1
+compile with diagnostic capture, L2 unit), `bench-cli` (the `run` binary). Plus
+one hand-written frozen borrow-checker task with five hidden tests.
+
+**Verified** against a mock model: correct → 1.000/none, second-mutable-borrow →
+0.000/borrowck (from a real `E0499`), whole-slice-reverse → 0.200/logic.
+
+**Two bugs found by running it, not by review:**
+- A materialised task crate was adopted by the outer cargo workspace. Fixed with
+  a standalone `[workspace]` table in the task `Cargo.toml` — also how generated
+  tasks will ship.
+- The test-summary parser read the last `test result:` line (empty doc tests)
+  instead of summing lib + integration + doc sections.
+
+14 unit tests, clippy clean under `-D warnings`, rustfmt clean.
+
+**Not yet, by design:** generation, seeding, the sandbox, resume, submission,
+and the blocking measurements the reviews flagged (ρ / Q22, the pass predicate /
+Q28, the statistical machinery / Q29).
