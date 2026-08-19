@@ -15,7 +15,27 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 
 ## Status
 
-**Exploratory / design phase.** No code yet. This repository currently holds the design documents that specify the system.
+**Building — P0 spine landed.** The design phase (16 docs, 10 ADRs, 6 adversarial review rounds) is under `docs/`. Code has now started, following the roadmap in [docs/14-roadmap.md](docs/14-roadmap.md).
+
+**P0 — the spine — works end to end.** `rustybench run` sends a frozen task to any OpenAI-compatible endpoint, grades the response with the real `cargo`/`rustc` toolchain, and writes a scored JSONL journal line. It discriminates a correct answer (score 1.0), a borrow-checker failure (score 0.0, `failure_class` = `borrowck`, derived from a real `E0499`), and a logic failure (score 0.2 = 1 of 5 hidden tests) — the P0 exit criterion.
+
+```
+crates/
+  bench-core     types, scoring, rustc-code → FailureClass    (pure, no I/O)
+  bench-model    OpenAI-compatible /v1/chat/completions client
+  bench-oracle   L0 apply · L1 compile+diagnostics · L2 unit tests
+  bench-cli      the `rustybench run` binary
+tasks/frozen/    a hand-written frozen task for the spine
+```
+
+Build and try it:
+
+```bash
+cargo test                 # 14 tests across the four crates
+cargo run -p bench-cli -- run --task tasks/frozen/split-mut-window --model http://localhost:8080
+```
+
+Still to come, per the roadmap: generation (P3), the sandbox (P1), resume (P4), and everything the review rounds flagged as blocking — the pass predicate on `task_score` (Q28), ρ (Q22), and the statistical machinery (Q29).
 
 ## Read order
 

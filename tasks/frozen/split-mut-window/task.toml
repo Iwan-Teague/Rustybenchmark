@@ -1,0 +1,6 @@
+schema = 1
+id = "frozen/split-mut-window"
+category = "borrow-lifetimes"
+kind = "frozen"
+answer_path = "src/lib.rs"
+system_prompt = "You are an expert Rust programmer. Respond with a SINGLE ```rust code block containing the complete contents of src/lib.rs. No prose, no explanation, no other text."
