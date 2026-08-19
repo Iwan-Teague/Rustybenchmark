@@ -6,7 +6,14 @@ Auto-upload is the right product idea. It is also an outward-facing action carry
 
 - **Opt-in, never opt-out.** On first run the harness prints the exact JSON that would be sent and asks. The choice is stored.
 - **Three separate consents**, because they are materially different things to agree to:
-  1. Publish redacted scores and hardware class to the public leaderboard.
+  1. Publish redacted scores and hardware class to the public leaderboard, **and grant the project a
+     perpetual, worldwide, non-exclusive licence to publish these redacted results and to license
+     them onward under Creative Commons Attribution 4.0 International (CC BY 4.0)**.
+
+     Consent to *publish* is not by itself a licence to *sublicense*, and CC BY obliges the project
+     to grant downstream rights it must therefore hold. The licence is named in full on the consent
+     screen — not linked — and a harness test asserts the consent text contains that name. See
+     [DATA-LICENSE.md](../DATA-LICENSE.md).
   2. Upload encrypted model output for T1 replay verification (private, 90-day retention, never published).
   3. Contact for T3 audit follow-up (optional, requires an identifier).
 - `--no-submit` and `RUSTBENCH_SUBMIT=0` always win, regardless of stored consent.

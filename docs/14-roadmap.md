@@ -122,7 +122,9 @@ The experiment that the earlier draft omitted entirely, and on which all suite s
 - `status` with partial scores and ETA
 - `bench-stats`: cluster bootstrap, ICC estimation, McNemar, effective N
 
-**Exit:** a run killed at every stage boundary resumes to bit-identical final results.
+**Exit:** a run killed at every stage boundary resumes to bit-identical final results, **and** a
+reader who has never seen these documents can state, from the report alone, one thing the run proves
+and one thing it does not.
 
 ### P5 — First real data · 8 weeks · *critical path*
 

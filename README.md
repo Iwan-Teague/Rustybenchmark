@@ -37,6 +37,7 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 | 12 | [docs/13-architecture.md](docs/13-architecture.md) | Crate layout and dependency direction |
 | 13 | [docs/14-roadmap.md](docs/14-roadmap.md) | Build order and the minimum shippable product |
 | 14 | [docs/15-profiles-and-divisions.md](docs/15-profiles-and-divisions.md) | What the harness pins, gates, keys and frees; the Pinned / Tuned / Open divisions; weights identity; MCP |
+| 15 | [docs/16-value-and-data.md](docs/16-value-and-data.md) | What the individual runner gets, data sufficiency, the dataset licence, and what is explicitly out of scope |
 
 Supporting:
 
@@ -44,6 +45,7 @@ Supporting:
 - **[docs/REVIEW-2.md](docs/REVIEW-2.md)** — adversarial review round 2, empirical against rustc 1.97. Found a direct contradiction between the statistical and integrity designs, and measured the diagnostic instrumentation to be blind for a third of realistic failures
 - **[docs/REVIEW-3.md](docs/REVIEW-3.md)** — adversarial review round 3. Settled four deferred questions empirically; two settled against the design. `cargo clippy --fix` solves part of a core category, and the frozen plan could not hold probe units
 - **[docs/REVIEW-4.md](docs/REVIEW-4.md)** — adversarial review round 4. The precomputation detector is defeated by an adversary willing to fail units deliberately; seed secrecy replaces it as the primary control. Also records a near-miss simplification that two simulations disagreed about
+- **[docs/REVIEW-6.md](docs/REVIEW-6.md)** — adversarial review round 6. 72 findings, 23 verified. The statistical machinery cannot be built as specified: `task_score` is continuous, McNemar is a binary test, and no pass predicate exists anywhere — so `throughput_score` is uncomputable. **Unevenly verified; read its first section before acting on it**
 - **[docs/REVIEW-5.md](docs/REVIEW-5.md)** — adversarial review round 5. 58 findings, 21 severe. Invalidates round 4's pairing result and with it the entire secrecy architecture; the mining pipeline and the plausibility checks do not work as specified. **Read R5-S1 first**
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — terms used precisely throughout
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved decisions, with the phase each blocks
@@ -51,11 +53,17 @@ Supporting:
 
 ## The one-paragraph version
 
-Static coding benchmarks rot: models memorise them. Rustybenchmark ships **generators**, not answers. Each task family is a function from a seed to a fresh problem instance, its reference implementation, and its property-based oracle — all constructed from the same seed, so the oracle is correct by construction and the instance has never been seen. Grading is deterministic given the seed, which means the server can independently re-verify any submitted correctness claim. Hardware claims cannot be verified, so they are reported separately and at a lower trust level. Runs checkpoint continuously and resume across sessions, because the largest suite takes around 39 hours on consumer hardware.
+Static coding benchmarks rot: models memorise them. Rustybenchmark ships **generators**, not answers. Each task family is a function from a seed to a fresh problem instance, its reference implementation, and its property-based oracle — all constructed from the same seed, so the oracle is correct by construction and the instance has never been seen. Grading is deterministic given the seed, which means the server can independently re-verify any submitted correctness claim. Hardware claims cannot be verified, so they are reported separately and at a lower trust level. Runs checkpoint continuously and resume across sessions, because the largest suite takes around 44.5 hours on consumer hardware.
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE.md) — free for any noncommercial purpose, including
+**Two licences, deliberately.** The harness is noncommercial; the *data it produces* is not, because
+independent re-derivation is the project's strongest integrity control and most of the parties with
+the motive to audit a row are commercial.
+
+- **Published results corpus → [CC BY 4.0](DATA-LICENSE.md).** Anyone may download the dump,
+  recompute the leaderboard, and build on the data, commercially or not.
+- **Harness and synthetic task corpus → [PolyForm Noncommercial License 1.0.0](LICENSE.md)** — free for any noncommercial purpose, including
 personal, research, educational, and charitable use. Commercial use requires a separate licence;
 open an issue.
 

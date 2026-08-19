@@ -375,3 +375,30 @@ A check that fires on most honest users and none of the adversarial ones is wors
 Prefix caching is on by default in the named backends, is unrecorded, and inflates `throughput_score` by **8–139%**. Backends cache differently, so cross-backend comparison is invalid as specified. Separately, `prefill_ms`/`gen_ms` cannot be obtained over the OpenAI-compatible surface for three of the four named backends, which silently disables the only decode-side plausibility check.
 
 Options: require cache-disabling flags where the backend supports them and record the setting; or abandon cross-backend throughput comparison and scope `throughput_score` to within-backend only.
+
+---
+
+## Q28 — Define the pass predicate on `task_score` · **BLOCKING**
+
+**Blocks:** `bench-stats`, and three published metrics. Raised by [REVIEW-6.md](REVIEW-6.md).
+
+`task_score` is continuous on [0,1] — a weighted mean of five oracle layers. **No pass/fail predicate is defined anywhere in 26 documents.** Simulated at the documented default weights: 97,838 distinct values, P(score = 0) = 47.5% (the L0/L1 gate), **P(score = 1.0) = 0.0%**.
+
+Six consumers each currently assume their own implicit threshold: `throughput_score` ("tasks passed per hour" — uncomputable as written), `time_to_first_pass`, McNemar model comparison, the sign-test detector, the probe discordance calibration, and `budget_exhausted_rate`.
+
+Defining it once will silently change all six. An analyst sweeping plausible cuts gets **23.3% type-I error** and can move the reported effect size by a median 7 points, so the cut must be pre-registered, not chosen.
+
+---
+
+## Q29 — The statistical machinery is undefined, not mis-tuned
+
+**Blocks:** `bench-stats` (roadmap P4). Raised by [REVIEW-6.md](REVIEW-6.md).
+
+Four things `bench-stats` is specified to compute have no specification:
+
+1. **The core-seed collapse rule** for the sign test. `deep` runs 4 core seeds per family against 1 probe seed. The null holds **only** if the collapsed bit is marginally distributed as a single seed — proven closed-form, `E[b]−E[c] = E[P(B=1|p)] − E[p]`. Every deterministic k>1 rule breaks it: measured honest-run false-accusation rates of **100%** (`any`), 53.7% (`majority`), 4.2% (pick-one).
+2. **The ICC estimator.** Unspecified, and the natural one returns negative values often enough to publish CIs *tighter than an independent sample*.
+3. **The bootstrap unit.** [07](07-statistics.md) declares clustering two-level and makes the bootstrap resample shapes, but the CI-computation section 180 lines later still specifies family-level resampling, and the design-effect formula was never updated — so every published effective N assumes the one-level model the same document rejects.
+4. **Multiplicity.** No correction anywhere, against 11 category scores plus model-vs-model comparisons. Family-wise error rate on the radar chart alone: **94–99%**.
+
+Additionally the percentile cluster bootstrap **under-covers at every per-category cluster count** — 92% at a core category, 84% at `idiom-refactor` — against a nominal 95%.

@@ -224,7 +224,8 @@ Canonical CBOR, ed25519-signed. JSON shown for readability.
   "calibration": [ "per-segment calib summaries" ],
   "units": [ "journal lines, redacted" ],
   "report": { "...": "report.json" },
-  "consents": { "public_scores": true, "replay_artifacts": true, "audit_contact": false },
+  "consents": { "public_scores": true, "replay_artifacts": true, "audit_contact": false,
+                "terms_version": "2026-08-19", "terms_hash": "blake3:..." },
   "signature": "ed25519:..."
 }
 ```

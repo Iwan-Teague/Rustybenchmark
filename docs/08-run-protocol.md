@@ -185,6 +185,13 @@ Both attempts are scored. `first_try_score` is retained alongside the final scor
 ## CLI surface
 
 ```
+rustybench doctor                        # ~90 s config audit: probes effective context, concurrency,
+                                         #   rope, KV dtype, sampler defaults, tools leakage.
+                                         #   Prints the exact fix for each. Run this FIRST.
+rustybench ab --factor <f>               # controlled A/B on one factor (backend, exec-class, quant,
+                                         #   spec-decode) on the user's own machine
+rustybench config-audit                  # sweep the user's own serving configs, ranked
+rustybench compare <run_a> <run_b> [--paired]   # McNemar contrast over the shared core seed set
 rustybench profile                       # hardware inventory only
 rustybench calibrate                     # calibration only
 rustybench run --suite <s> --model <url> [--epoch <e>] [--quality] [--max-duration 4h]
