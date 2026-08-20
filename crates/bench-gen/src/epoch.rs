@@ -168,6 +168,34 @@ pub fn min_pairwise_distance(views: &[String]) -> f64 {
     min
 }
 
+/// Greedy count of items that are all pairwise `>= threshold`, taken in order —
+/// the distinct-at-floor capacity for whatever text the caller measured on.
+pub fn greedy_distinct_count(views: &[String], threshold: f64) -> usize {
+    let mut kept: Vec<&String> = Vec::new();
+    for v in views {
+        if kept
+            .iter()
+            .all(|k| distance::shingle_distance(k, v, distance::K) >= threshold)
+        {
+            kept.push(v);
+        }
+    }
+    kept.len()
+}
+
+/// Distinct-at-floor capacity measured on the **reference** (the solution) for
+/// `seed = 0..upto`. This is the honest anti-*memorisation-of-solution* measure:
+/// unlike view-capacity it is not inflated by seed-varied worked examples (which
+/// change the prompt without changing the answer). It is, however, *deflated* by
+/// shared solution boilerplate — two references that differ only in a constant or
+/// one expression read as near-twins even when the underlying skill differs — so
+/// it under-counts genuine task diversity for heavily-scaffolded families. Neither
+/// text measure is the true diversity, which is the structural spec count (Q31).
+pub fn reference_capacity(gen: &dyn Generator, upto: u64, threshold: f64) -> usize {
+    let refs: Vec<String> = (0..upto).map(|s| gen.reference_code(s)).collect();
+    greedy_distinct_count(&refs, threshold)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,30 +225,22 @@ mod tests {
     }
 
     #[test]
-    fn sampler_serves_a_clean_set_where_raw_index_collides() {
-        // window-op's seeds 0..10 contain near-twin pairs (min 0.122 < floor — the
-        // 7/45 reported by validate-family). The sampler must instead serve a set
-        // that clears the floor, rejecting the collisions. This is the Q30 fix,
-        // demonstrated on the family whose raw-index draw actually collides.
+    fn view_distance_saturates_but_reference_distance_does_not() {
+        // The Q31 finding, pinned. Seed-varied worked examples make every *prompt*
+        // distinct, so view-distance no longer collides even at tiny N — while the
+        // *solutions* still contain near-twins (few genuine logics, shared plumbing).
+        // A sampler measuring view-distance therefore rejects nothing and masks low
+        // solution diversity; reference-distance is where the real collisions live.
         let g = WindowOpFamily;
-
-        let naive: Vec<String> = (0..10u64).map(|s| model_view(&g, s)).collect();
-        let naive_min = min_pairwise_distance(&naive);
+        let views: Vec<String> = (0..10u64).map(|s| model_view(&g, s)).collect();
+        let refs: Vec<String> = (0..10u64).map(|s| g.reference_code(s)).collect();
         assert!(
-            naive_min < MIN_INSTANCE_DISTANCE,
-            "precondition: raw-index 10-set should contain a near-twin (min {naive_min})"
-        );
-
-        let plan = plan_epoch_from(&g, 0u64.., 6, MIN_INSTANCE_DISTANCE, 500).unwrap();
-        assert_eq!(plan.seeds.len(), 6);
-        assert!(
-            plan.min_pairwise >= MIN_INSTANCE_DISTANCE,
-            "served set must clear the floor (min {})",
-            plan.min_pairwise
+            min_pairwise_distance(&views) >= MIN_INSTANCE_DISTANCE,
+            "view-distance is saturated by example variation"
         );
         assert!(
-            plan.rejected() > 0,
-            "sampler should have rejected the raw-index collisions"
+            min_pairwise_distance(&refs) < MIN_INSTANCE_DISTANCE,
+            "but the solutions still contain near-twins"
         );
     }
 
@@ -242,29 +262,38 @@ mod tests {
     // the per-epoch seed count, the family is memorisation-vulnerable — so these
     // are meant to fail loudly, not be bumped silently.
 
+    // Capacity is pinned on the REFERENCE (the solution), not the model-view.
+    // View-capacity is gameable: seed-varied worked examples make every prompt
+    // distinct without changing the answer (window-op saturates at 100% acceptance).
+    // Reference-capacity measures how many genuinely different *solutions* a family
+    // serves — the honest anti-memorisation number. It under-counts (shared
+    // boilerplate reads as twin), so these are lower bounds / documented ceilings,
+    // not diversity itself, which is the structural spec count (docs Q31).
+
     #[test]
-    fn window_op_capacity_at_floor_is_8() {
-        // window-op is intentionally narrow (a handful of window operations), so 8
-        // is its true structural ceiling. Ask for 9 to force the sampler to exhaust.
+    fn window_op_reference_capacity_is_healthy() {
+        // 6 in-place operations (incl. Negate, AddConst) x rotate amounts x strides.
         let g = WindowOpFamily;
-        let err = plan_epoch_from(&g, 0u64..2_000, 9, MIN_INSTANCE_DISTANCE, 2_000).unwrap_err();
-        assert_eq!(
-            err.accepted, 8,
-            "window-op seats 8 distinct instances at 0.25"
+        let cap = reference_capacity(&g, 400, MIN_INSTANCE_DISTANCE);
+        assert!(
+            cap >= 18,
+            "window-op should serve many distinct solutions, got {cap}"
         );
     }
 
     #[test]
-    fn error_handling_capacity_clears_a_per_epoch_count() {
-        // After the surface was widened (5 combines x 6 rules + seed-varied worked
-        // examples, docs/04 + BUILD-LOG 2026-08-20), error-handling seats far more
-        // than the 3 it managed before. Assert a lower bound comfortably above any
-        // per-epoch seed count rather than the exact figure, which is sensitive to
-        // the example RNG. Measured capacity at the floor is ~326.
+    fn error_handling_reference_capacity_is_low_by_design() {
+        // The pinned-enum plumbing dominates every solution, so 5 combines x 6 rules
+        // collapse to a single-digit reference-capacity: the family tests plumbing,
+        // not error design (docs/04), and its genuine solution diversity is small.
+        // Widening the surface raised *view*-capacity (fresh prompts) but not this.
+        // Pinned as a standing, honest limitation — see Q31.
         let g = ErrorHandlingFamily;
-        let plan = plan_epoch_from(&g, 0u64..1_500, 50, MIN_INSTANCE_DISTANCE, 1_500).unwrap();
-        assert_eq!(plan.seeds.len(), 50);
-        assert!(plan.min_pairwise >= MIN_INSTANCE_DISTANCE);
+        let cap = reference_capacity(&g, 400, MIN_INSTANCE_DISTANCE);
+        assert!(
+            (5..=12).contains(&cap),
+            "error-handling reference-capacity is expected to be low, got {cap}"
+        );
     }
 
     #[test]

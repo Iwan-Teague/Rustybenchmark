@@ -438,50 +438,65 @@ fn validate_family(
 
     if views.len() >= 2 {
         let floor = bench_gen::epoch::MIN_INSTANCE_DISTANCE;
-        let mut min = f64::INFINITY;
-        let mut all_d: Vec<f64> = Vec::new();
-        let mut near_twins = 0u32;
-        for i in 0..views.len() {
-            for j in (i + 1)..views.len() {
-                let d = bench_gen::distance::shingle_distance(
-                    &views[i],
-                    &views[j],
-                    bench_gen::distance::K,
-                );
-                min = min.min(d);
-                all_d.push(d);
-                if d < floor {
-                    near_twins += 1;
+
+        // (min, median, near-twin pairs, total pairs) over a set of texts.
+        fn dist_stats(items: &[String], floor: f64) -> (f64, f64, u32, usize) {
+            let mut all_d: Vec<f64> = Vec::new();
+            let mut near = 0u32;
+            for i in 0..items.len() {
+                for j in (i + 1)..items.len() {
+                    let d = bench_gen::distance::shingle_distance(
+                        &items[i],
+                        &items[j],
+                        bench_gen::distance::K,
+                    );
+                    all_d.push(d);
+                    if d < floor {
+                        near += 1;
+                    }
                 }
             }
+            all_d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let min = all_d.first().copied().unwrap_or(1.0);
+            let median = all_d[all_d.len() / 2];
+            (min, median, near, all_d.len())
         }
-        all_d.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let median = all_d[all_d.len() / 2];
+
+        // What the model sees. Gameable: seed-varied worked examples inflate this
+        // without changing the answer (Q31), so a healthy line here is necessary
+        // but NOT sufficient.
+        let (vmin, vmed, vnear, vtot) = dist_stats(&views, floor);
         println!(
-            "  anti-twin (prompt+skeleton): min={min:.3} median={median:.3} near-twin pairs (<{floor})={near_twins}/{}",
-            all_d.len()
+            "  anti-twin  view (prompt+skeleton): min={vmin:.3} median={vmed:.3} near-twin pairs (<{floor})={vnear}/{vtot}"
         );
 
-        // Detection is the average distance above; prevention is the distance-aware
-        // epoch sampler (Q30). Report the family's *distinct-at-floor capacity*: how
-        // many pairwise-clean instances it can actually serve. A capacity below the
-        // per-epoch seed count means the family needs a larger variable surface, not
-        // just a passing median.
+        // The honest anti-memorisation-of-solution measure: distance between the
+        // references. Not inflated by example variation (but deflated by shared
+        // boilerplate — see Q31).
+        let refs: Vec<String> = (0..seeds).map(|s| g.reference_code(s)).collect();
+        let (rmin, rmed, rnear, rtot) = dist_stats(&refs, floor);
+        println!(
+            "  anti-twin  reference (solution) : min={rmin:.3} median={rmed:.3} near-twin pairs (<{floor})={rnear}/{rtot}"
+        );
+
+        // Distinct-at-floor capacity on each basis. view-capacity via the epoch
+        // sampler (what it currently serves on); reference-capacity is the honest
+        // solution-diversity ceiling.
         let want = views.len();
         let budget = ((want as u32) * 100).clamp(500, 4000);
-        match bench_gen::epoch::plan_epoch_from(g.as_ref(), 0u64.., want, floor, budget) {
-            Ok(plan) => println!(
-                "  epoch sampler: served {} pairwise-distant seed(s) (rejected {} collision(s), min={:.3})",
-                plan.seeds.len(),
-                plan.rejected(),
-                plan.min_pairwise,
-            ),
-            Err(e) => println!(
-                "  epoch sampler: capacity {} pairwise-distant instance(s) at floor {floor} \
-                 (asked {want}, {} candidates examined) — enlarge the variable surface (Q30)",
-                e.accepted, e.attempts,
-            ),
-        }
+        let view_cap =
+            match bench_gen::epoch::plan_epoch_from(g.as_ref(), 0u64.., want, floor, budget) {
+                Ok(plan) => format!(
+                    "{}+ (asked {want}, rejected {})",
+                    plan.seeds.len(),
+                    plan.rejected()
+                ),
+                Err(e) => format!("{} (exhausted at {} candidates)", e.accepted, e.attempts),
+            };
+        let ref_cap = bench_gen::epoch::reference_capacity(g.as_ref(), 400, floor);
+        println!(
+            "  capacity   view={view_cap}  reference={ref_cap}  (reference is the honest solution-diversity ceiling — Q31)"
+        );
     }
 
     let _ = std::fs::remove_dir_all(scratch);

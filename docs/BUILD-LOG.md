@@ -8,6 +8,46 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Widened `window-op` — and it exposed that the anti-twin metric is unreliable (Q31)
+
+Set out to raise `window-op`'s tight capacity (8) with the same lever that "fixed" `error-handling`:
+two new in-place ops (`Negate`, `AddConst(k)` — chosen because they change every generic window, so the
+`identity` baseline stays caught; `Min`/`Max` avoided for the `i64::MIN` literal landmine) plus
+seed-varied worked examples. All construction gates stayed green.
+
+**Then measuring capacity two ways broke the earlier story.** The epoch sampler measures distance on the
+prompt+skeleton — what the model sees. Seed-varying the examples makes every prompt textually distinct
+*without changing the task*, so `window-op` saturated: 100 % of raw-index seeds accepted, view-capacity
+effectively unbounded. Measuring on the **reference** (the solution) instead told the truth:
+
+| family | view near-twins | view-capacity | reference near-twins | reference-capacity |
+|---|---|---|---|---|
+| window-op | 0/28 | saturated | 1/28 | **22** |
+| error-handling | 0/28 | ~250–326 | **12/28** | **7** |
+
+So `error-handling`'s "3 → 326" win from the previous entry was mostly illusory — its genuine
+solution-diversity is **7**. View-distance over-counts (gameable by example noise); reference-distance
+under-counts (deflated by shared boilerplate). Neither is task diversity, which is the structural spec
+count. Written up as **[Q31](OPEN-QUESTIONS.md)** (BLOCKING) with three options; the honest correction is
+recorded against Q30 and doc 04 too, rather than quietly overwriting the earlier numbers.
+
+Changes made in response, all honest-by-construction:
+- `validate-family` now prints **both** view- and reference-distance lines and **both** capacities, so
+  the gap is visible in CI. Live: window-op `reference min=0.146 cap=22`; error-handling
+  `reference min=0.094 near-twins 12/28 cap=7`.
+- `bench_gen::epoch` gained `greedy_distinct_count` and `reference_capacity` (public, documented with the
+  over/under-count caveats).
+- Capacity regression tests re-pinned to **reference**-capacity: `window_op_reference_capacity_is_healthy`
+  (≥18) and `error_handling_reference_capacity_is_low_by_design` (5..=12, a documented limitation, not a
+  bug). New `view_distance_saturates_but_reference_distance_does_not` pins the Q31 finding itself.
+
+`window-op` keeps the two new ops (genuine solution diversity, reference-capacity 22) and the seed-varied
+examples (contamination-resistance). 62 workspace tests; clippy/fmt clean. The epoch sampler still serves
+on view-distance — post-finding that means it rarely rejects, so which basis it should serve on is part
+of the Q31 decision.
+
+---
+
 ## 2026-08-20 · Widened `error-handling` (Q30 lever 2): capacity 3 → ~326
 
 The sampler flagged `error-handling`'s distinct-at-floor capacity as **3** — unusable, below any

@@ -3,10 +3,17 @@
 //! Apply an in-place operation to selected consecutive, non-overlapping windows
 //! of width `w` in a `&mut [i64]`, and return the number of windows the operation
 //! was applied to. Solution-first: the seed selects the *operation* (Reverse /
-//! RotateLeft(k) / RotateRight(k) / SwapEnds), a *stride* (every window / every
-//! other window) and the function name, from which the reference, the example
-//! outputs, the differential oracle and the skeleton are all derived — so seeds
-//! vary the actual logic a model must produce, not just identifiers.
+//! RotateLeft(k) / RotateRight(k) / SwapEnds / Negate / AddConst(k)), a *stride*
+//! (every window / every other window), the function name and the worked-example
+//! data, from which the reference, the example outputs, the differential oracle
+//! and the skeleton are all derived — so seeds vary the actual logic a model must
+//! produce, not just identifiers.
+//!
+//! Every operation is a genuine in-place mutation that leaves no allocation on the
+//! hot path (the family's constraint-dominant signal), and every one changes a
+//! window of distinct non-zero values — which is what keeps the `identity`
+//! trivial-baseline reliably failing. The surface is sized so the epoch sampler's
+//! distinct-at-floor capacity clears a per-epoch seed count (docs/02, Q30).
 
 use crate::{mint_canary, GeneratedTask, Generator, Rng};
 use std::collections::BTreeMap;
@@ -19,6 +26,8 @@ enum Op {
     RotateLeft(usize),
     RotateRight(usize),
     SwapEnds,
+    Negate,
+    AddConst(i64),
 }
 
 struct Spec {
@@ -39,11 +48,13 @@ const NAMES: &[&str] = &[
 
 fn sample(seed: u64) -> Spec {
     let mut rng = Rng::new(seed);
-    let op = match rng.below(4) {
+    let op = match rng.below(6) {
         0 => Op::Reverse,
         1 => Op::RotateLeft(1 + rng.below(3) as usize), // k in 1..=3
         2 => Op::RotateRight(1 + rng.below(3) as usize), // k in 1..=3
-        _ => Op::SwapEnds,
+        3 => Op::SwapEnds,
+        4 => Op::Negate,
+        _ => Op::AddConst(1 + rng.below(3) as i64), // k in 1..=3
     };
     let stride = 1 + rng.below(2) as usize; // 1 or 2
     let fn_name = NAMES[rng.below(NAMES.len() as u64) as usize];
@@ -74,6 +85,16 @@ fn apply(spec: &Spec, v: &mut [i64], w: usize) -> usize {
                     let last = w - 1;
                     chunk.swap(0, last);
                 }
+                Op::Negate => {
+                    for x in chunk.iter_mut() {
+                        *x = -*x;
+                    }
+                }
+                Op::AddConst(k) => {
+                    for x in chunk.iter_mut() {
+                        *x += k;
+                    }
+                }
             }
             count += 1;
         }
@@ -91,6 +112,8 @@ fn op_body(op: &Op) -> String {
         Op::SwapEnds => {
             "let last = chunk.len() - 1;\n                chunk.swap(0, last);".to_string()
         }
+        Op::Negate => "for x in chunk.iter_mut() { *x = -*x; }".to_string(),
+        Op::AddConst(k) => format!("for x in chunk.iter_mut() {{ *x += {k}; }}"),
     }
 }
 
@@ -104,6 +127,8 @@ fn op_prose(op: &Op) -> String {
             format!("rotate the elements of the window right by {k} position(s), wrapping around")
         }
         Op::SwapEnds => "swap the first and last element of the window".to_string(),
+        Op::Negate => "replace each element of the window with its negation".to_string(),
+        Op::AddConst(k) => format!("add {k} to each element of the window"),
     }
 }
 
@@ -138,8 +163,8 @@ fn reference_src(spec: &Spec) -> String {
     )
 }
 
-fn skeleton_src(spec: &Spec) -> String {
-    let (examples, _) = worked_examples(spec);
+fn skeleton_src(spec: &Spec, seed: u64) -> String {
+    let (examples, _) = worked_examples(spec, seed);
     format!(
         "//! Implement `{name}` below.\n\
          //!\n\
@@ -160,28 +185,61 @@ fn skeleton_src(spec: &Spec) -> String {
 type ExampleCase = (Vec<i64>, usize, Vec<i64>, usize);
 
 /// A few worked examples, computed natively so they are correct by construction.
-fn worked_examples(spec: &Spec) -> (String, Vec<ExampleCase>) {
-    // Enough windows that a stride of 2 is visible.
-    let inputs: &[(&[i64], usize)] = &[
-        (&[1, 2, 3, 4, 5, 6, 7, 8], 2),
-        (&[1, 2, 3, 4, 5, 6], 2),
-        (&[1, 2, 3, 4, 5, 6, 7, 8, 9], 3),
-    ];
+/// Seed-varied — this is the family's biggest per-instance textual lever (it
+/// appears in both the prompt and the skeleton doc), which is what lifts the
+/// distinct-at-floor capacity (docs/02, Q30). The first case is a canonical
+/// strictly-increasing input that *every* operation changes, so the `identity`
+/// trivial-baseline always fails; the rest are random, non-zero, and sized so a
+/// stride of 2 is visible.
+fn worked_examples(spec: &Spec, seed: u64) -> (String, Vec<ExampleCase>) {
+    let mut rng = Rng::new(seed ^ 0x8EF1_2A3B_0000_0001);
+    let mut inputs: Vec<(Vec<i64>, usize)> = Vec::new();
+
+    // Canonical increasing case: distinct, non-zero, changed by any op. `w` is
+    // kept above the max rotate amount (3) so `rotate_left/right(k)` is never a
+    // no-op here — that is what makes "every op changes this case" hold, which the
+    // `identity` baseline depends on.
+    {
+        let w = 4 + (seed % 2) as usize; // 4 or 5
+        let windows = 4;
+        let base = 1 + (seed % 5) as i64;
+        let input: Vec<i64> = (0..w * windows).map(|i| base + i as i64).collect();
+        inputs.push((input, w));
+    }
+    // Random non-zero cases with enough windows for a stride of 2 to show.
+    for _ in 0..3 {
+        let w = 2 + rng.below(2) as usize; // 2 or 3
+        let windows = 4 + rng.below(3) as usize; // 4..=6 full windows
+        let trailing = rng.below(w as u64) as usize; // 0..=w-1 leftover
+        let len = w * windows + trailing;
+        let input: Vec<i64> = (0..len)
+            .map(|_| {
+                let mag = 1 + rng.below(9) as i64; // 1..=9, never zero
+                if rng.below(2) == 0 {
+                    mag
+                } else {
+                    -mag
+                }
+            })
+            .collect();
+        inputs.push((input, w));
+    }
+
     let mut cases = Vec::new();
     let mut prose = String::new();
     for (input, w) in inputs {
-        let mut out = input.to_vec();
-        let count = apply(spec, &mut out, *w);
+        let mut out = input.clone();
+        let count = apply(spec, &mut out, w);
         prose.push_str(&format!(
             "  {input:?}, w={w}  ->  {out:?}, returns {count}\n"
         ));
-        cases.push((input.to_vec(), *w, out, count));
+        cases.push((input, w, out, count));
     }
     (prose, cases)
 }
 
-fn prompt(spec: &Spec, canary: &str) -> String {
-    let (examples, _) = worked_examples(spec);
+fn prompt(spec: &Spec, seed: u64, canary: &str) -> String {
+    let (examples, _) = worked_examples(spec, seed);
     format!(
         "Implement the function `{name}` in `src/lib.rs`.\n\
          \n\
@@ -223,8 +281,8 @@ fn cargo_toml() -> String {
         .to_string()
 }
 
-fn behavior_test_src(spec: &Spec) -> String {
-    let (_, cases) = worked_examples(spec);
+fn behavior_test_src(spec: &Spec, seed: u64) -> String {
+    let (_, cases) = worked_examples(spec, seed);
     let mut body = format!("use task::{};\n\n", spec.fn_name);
     for (i, (input, w, out, count)) in cases.iter().enumerate() {
         body.push_str(&format!(
@@ -350,10 +408,13 @@ impl Generator for WindowOpFamily {
 
         let mut files = BTreeMap::new();
         files.insert(PathBuf::from("Cargo.toml"), cargo_toml());
-        files.insert(PathBuf::from("src/lib.rs"), skeleton_src(&spec));
+        files.insert(PathBuf::from("src/lib.rs"), skeleton_src(&spec, seed));
 
         let mut hidden = BTreeMap::new();
-        hidden.insert(PathBuf::from("tests/behavior.rs"), behavior_test_src(&spec));
+        hidden.insert(
+            PathBuf::from("tests/behavior.rs"),
+            behavior_test_src(&spec, seed),
+        );
         hidden.insert(
             PathBuf::from("tests/differential.rs"),
             differential_test_src(&spec),
@@ -363,7 +424,7 @@ impl Generator for WindowOpFamily {
         GeneratedTask {
             id: format!("window-op/{seed:016x}"),
             category: self.category().to_string(),
-            prompt: prompt(&spec, &canary),
+            prompt: prompt(&spec, seed, &canary),
             canary,
             answer_path: "src/lib.rs".to_string(),
             files,
@@ -381,7 +442,7 @@ impl Generator for WindowOpFamily {
         reference_src(&sample(seed))
     }
     fn skeleton_code(&self, seed: u64) -> String {
-        skeleton_src(&sample(seed))
+        skeleton_src(&sample(seed), seed)
     }
     fn trivial_baselines(&self, seed: u64) -> Vec<(String, String)> {
         let spec = sample(seed);
@@ -409,13 +470,13 @@ mod tests {
     #[test]
     fn seeds_vary_op_and_stride() {
         let mut variants = std::collections::HashSet::new();
-        for seed in 0..80u64 {
+        for seed in 0..120u64 {
             let s = sample(seed);
             variants.insert(format!("{:?}/{}", s.op, s.stride));
         }
         assert!(
-            variants.len() >= 10,
-            "expected structural variety, got {}",
+            variants.len() >= 16,
+            "expected wide structural variety, got {}",
             variants.len()
         );
     }
@@ -424,12 +485,29 @@ mod tests {
     fn reference_agrees_with_native_apply() {
         for seed in [1u64, 2, 3, 7, 42, 99] {
             let spec = sample(seed);
-            let (_, cases) = worked_examples(&spec);
+            let (_, cases) = worked_examples(&spec, seed);
             for (input, w, expected, count) in cases {
                 let mut v = input.clone();
                 let c = apply(&spec, &mut v, w);
                 assert_eq!((c, v), (count, expected), "seed {seed}");
             }
+        }
+    }
+
+    #[test]
+    fn every_op_changes_the_canonical_case() {
+        // The identity trivial-baseline only fails if at least one worked-example
+        // window is actually mutated. Guarantee it: the first (canonical) case must
+        // change under every operation a seed can select.
+        for seed in 0..200u64 {
+            let spec = sample(seed);
+            let (_, cases) = worked_examples(&spec, seed);
+            let (input, w, out, _) = &cases[0];
+            assert_ne!(
+                input, out,
+                "canonical case unchanged for {:?} (seed {seed}, w={w})",
+                spec.op
+            );
         }
     }
 

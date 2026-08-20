@@ -228,11 +228,15 @@ every Phase-3 family is authored against. The sampler also *serves* the epoch: i
 near-twin, returning `Exhausted` if a family cannot supply the requested count — which is the point at
 which that family must be enlarged.
 
-`error-handling` is the worked example: it first measured a capacity of **3** (unusable), and widening
-its variable surface — combine ops 3 → 5, rules 3 → 6, seed-varied worked examples — lifted that to
-**~326** with zero near-twins, without breaking any construction gate ([Q30](OPEN-QUESTIONS.md),
-[BUILD-LOG](BUILD-LOG.md)). The lesson for authoring: design the variable surface to a target capacity,
-then let the sampler confirm it.
+`error-handling` is the worked example — and a cautionary one. Widening its variable surface lifted its
+*view*-capacity from 3 to hundreds, but measuring on the **solution** instead of the prompt shows a true
+capacity of only **7**: the seed-varied examples freshen the prompt without changing the answer. So
+distance-on-view is gameable and distance-on-reference is deflated by shared boilerplate; **neither text
+metric is task diversity**, which is the structural spec count. This is [Q31](OPEN-QUESTIONS.md), and
+until it is resolved `validate-family` reports *both* view- and reference-distance (and both capacities)
+so the gap is visible, and capacity is pinned on the honest reference number. The lesson for authoring:
+design the variable surface for genuine *solution* diversity, and do not trust a healthy view-distance
+line on its own.
 
 ## Generator validation (CI, ≥1000 seeds per family)
 

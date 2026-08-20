@@ -501,3 +501,68 @@ per-category floor vs. mandated surface width — is still open. Decide before a
 exemplar families. The gate now both *detects* the problem in CI and *prevents* it at serve time
 (`validate-family` reports median/near-twins **and** the epoch sampler's capacity; the sampler refuses
 to serve a twin, returning `Exhausted` instead).
+
+> **Correction (same day).** The ~326 above is *view*-capacity and it is largely illusory — see
+> **Q31**. Measuring capacity on the **reference** (the solution) instead of the prompt gives
+> `error-handling` a capacity of **7**, not 326: the seed-varied examples freshen the prompt without
+> changing the answer. The honest reading is that widening the surface bought *contamination-resistance*
+> (fresh prompts) but very little *solution diversity*. The lever-2 story stands as far as it goes;
+> what it does **not** do is make `error-handling` a high-diversity family. Treat the capacity numbers
+> in the table above as view-capacity throughout.
+
+---
+
+## Q31 — The text-distance anti-twin metric is unreliable; task identity is structural · **BLOCKING**
+
+**Blocks:** the `min_instance_distance` gate design, and every family's reported capacity. Found
+2026-08-20 while widening `window-op` ([BUILD-LOG](BUILD-LOG.md)).
+
+`min_instance_distance` is measured as token-shingle distance on the **prompt + skeleton** — what the
+model sees. Widening the two exemplar families exposed that this measure is unreliable in *both*
+directions, so a family can pass it while being memorisation-vulnerable, or fail it while being fine:
+
+- **It over-counts (gameable up).** Seed-varying the worked examples makes every prompt textually
+  distinct without changing the task. `window-op` then saturates: **100 % of raw-index seeds are
+  accepted**, view near-twins `0/28`, view-capacity effectively unbounded — purely from random example
+  arrays. A lazy family author could pass the gate with *zero* structural variety just by randomising
+  example numbers.
+- **It under-counts (deflated down) on the reference.** Measured on the solution instead, two references
+  that differ only in a constant (`n <= 10` vs `n <= 50`) or one expression read as near-twins even
+  when the underlying skill differs, because 80–90 % of the text is shared plumbing.
+
+Measured both ways at the 0.25 floor:
+
+| family | view near-twins | view-capacity | **reference near-twins** | **reference-capacity** |
+|---|---|---|---|---|
+| `window-op` | 0/28 | saturated (≈∞) | 1/28 | **22** |
+| `error-handling` | 0/28 | ~250–326 | **12/28** | **7** |
+
+The reference-capacity is the honest *anti-memorisation-of-solution* number, and it is brutal:
+`error-handling` serves only **7** genuinely-distinct solutions. Neither text measure is the true
+diversity, which is the **structural spec count** — the `(combine, rule, …)` tuple the generator draws
+from (≈60 for `error-handling`, though many collapse under any text metric). The generator *knows* the
+spec; the text distance is a lossy proxy for it.
+
+Options:
+
+1. **Measure anti-twin distance on the reference (solution), not the prompt.** Directly targets
+   memorisation-of-solution and is not gameable by example noise. Cost: deflated by boilerplate, so it
+   under-counts and would reject families that are actually fine — needs a lower, per-family floor, which
+   loops back into Q30.
+2. **Measure on the structural spec directly** (a canonical serialisation of the `(combine, rule, op,
+   stride, …)` tuple, Jaccard over its parts — the generalisation of R4-S4's transform-set metric to all
+   parametric families). This *is* task identity, is neither inflatable nor deflatable by text, and makes
+   "distinct-at-floor capacity" mean exactly "number of distinct task specs." Cost: each family must
+   expose its spec to the gate (a small trait method), and the metric no longer sees the model's actual
+   view, so **keep the view metric too**, for a different purpose (contamination-resistance: has the
+   model seen this exact prompt).
+3. **Two gates, two purposes.** View-distance guards *verbatim-recall* (fresh prompts each epoch);
+   spec-distance guards *solution-diversity* (enough genuinely different tasks). A family must clear
+   both. This is probably the right end state.
+
+Until resolved, `validate-family` reports **both** view- and reference-distance and both capacities so
+the gap is visible, and the epoch sampler still serves on view-distance (which, post-finding, means it
+rarely rejects anything — its guarantee is real but currently near-vacuous for these two families).
+The capacity regression tests are pinned on **reference**-capacity, the honest number.
+
+Decision needed before the corpus is scaled: which of the three, and what the per-family floor becomes.
