@@ -18,6 +18,7 @@ use std::path::PathBuf;
 pub mod distance;
 pub mod epoch;
 pub mod error_handling;
+pub mod grid_reduce;
 pub mod seq_transform;
 pub mod stack_machine;
 pub mod window_op;
@@ -166,6 +167,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "error-handling",
     "stack-machine",
     "seq-transform",
+    "grid-reduce",
 ];
 
 /// Look up a family by id.
@@ -175,6 +177,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "error-handling" => Some(Box::new(error_handling::ErrorHandlingFamily)),
         "stack-machine" => Some(Box::new(stack_machine::StackMachineFamily)),
         "seq-transform" => Some(Box::new(seq_transform::SeqTransformFamily)),
+        "grid-reduce" => Some(Box::new(grid_reduce::GridReduceFamily)),
         _ => None,
     }
 }
@@ -240,6 +243,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("stack-machine").unwrap().as_ref(), 4000),
             40
+        );
+        // grid-reduce = 2 axes x 6 reductions.
+        assert_eq!(
+            spec_diversity(family("grid-reduce").unwrap().as_ref(), 4000),
+            12
         );
         assert_eq!(
             spec_diversity(family("seq-transform").unwrap().as_ref(), 4000),
