@@ -70,6 +70,11 @@ enum Command {
         #[arg(long)]
         journal_b: PathBuf,
     },
+    /// Precomputation detector: sign test on family-paired core-vs-probe discordance.
+    Detect {
+        #[arg(long, default_value = "runs/journal.jsonl")]
+        journal: PathBuf,
+    },
     /// Run a whole epoch over every family: paired-core + fresh-probe seeds, resumable.
     RunSuite {
         #[arg(long)]
@@ -147,6 +152,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             journal_a,
             journal_b,
         } => compare(&journal_a, &journal_b),
+        Command::Detect { journal } => detect(&journal),
         Command::RunSuite {
             model,
             model_name,
@@ -845,6 +851,40 @@ fn compare(a: &Path, b: &Path) -> Result<(), Box<dyn std::error::Error>> {
         "A significantly better (p < 0.05)"
     };
     println!("verdict: {verdict}");
+    Ok(())
+}
+
+fn detect(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let records = bench_stats::load_journal(journal)
+        .map_err(|e| format!("reading {}: {e}", journal.display()))?;
+    let reports = bench_stats::detect(&records, bench_stats::DETECTOR_ALPHA);
+    if reports.is_empty() {
+        println!(
+            "no core/probe pairs in {} — run an epoch with --seeds-probe > 0 first",
+            journal.display()
+        );
+        return Ok(());
+    }
+    println!(
+        "precomputation detector (sign test, alpha={}):",
+        bench_stats::DETECTOR_ALPHA
+    );
+    for r in &reports {
+        let s = &r.sign;
+        println!(
+            "  epoch {:<10} families_paired={} core_wins={} probe_wins={} p={:.4}  {}",
+            r.epoch,
+            r.families_paired,
+            s.core_wins,
+            s.probe_wins,
+            s.p_value,
+            if s.flagged {
+                "*** FLAGGED: core beats fresh probe — possible precomputation"
+            } else {
+                "ok (no significant core advantage)"
+            },
+        );
+    }
     Ok(())
 }
 

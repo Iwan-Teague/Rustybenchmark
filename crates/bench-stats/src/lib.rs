@@ -51,13 +51,27 @@ pub const CLUSTER_FLOOR: usize = 8;
 /// Default bootstrap resamples.
 pub const BOOTSTRAP_ITERS: usize = 10_000;
 
+fn default_kind() -> String {
+    "core".to_string()
+}
+fn default_epoch() -> String {
+    "local".to_string()
+}
+
 /// One graded unit, as read from a journal line. Only the fields statistics needs
-/// are declared; serde ignores the rest (`model`, `cost`, `sandbox`, …).
+/// are declared; serde ignores the rest (`model`, `cost`, `sandbox`, …). `kind`,
+/// `index` and `epoch` default for pre-run-protocol journals that predate them.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Record {
     pub task_id: String,
     pub category: String,
     pub oracle: OracleVector,
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub index: u32,
+    #[serde(default = "default_epoch")]
+    pub epoch: String,
 }
 
 impl Record {
@@ -77,19 +91,44 @@ impl Record {
         self.oracle.passed()
     }
 
-    /// Build a synthetic record for tests and examples: a passing record has
-    /// `behaviour == 1.0` and no failing constraint; a failing one has behaviour
-    /// `0.5`. `score` is the (independent) composite value.
+    /// A synthetic core unit for tests: `epoch = "local"`, `kind = "core"`, `index = unit`.
     pub fn synthetic(category: &str, family: &str, unit: u64, score: f64, passed: bool) -> Record {
+        Record::synthetic_unit(
+            category,
+            family,
+            "local",
+            "core",
+            unit as u32,
+            score,
+            passed,
+        )
+    }
+
+    /// A synthetic record with an explicit epoch/kind/index — used by detector tests
+    /// that need paired core and probe units. A passing record has `behaviour == 1.0`
+    /// and no failing constraint; a failing one has behaviour `0.5`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn synthetic_unit(
+        category: &str,
+        family: &str,
+        epoch: &str,
+        kind: &str,
+        index: u32,
+        score: f64,
+        passed: bool,
+    ) -> Record {
         let mut oracle = OracleVector::apply_failed();
         oracle.apply_ok = true;
         oracle.compile_ok = true;
         oracle.behavior.score = Some(if passed { 1.0 } else { 0.5 });
         oracle.score = score as f32;
         Record {
-            task_id: format!("{family}/{unit:016x}"),
+            task_id: format!("{family}/{index:016x}"),
             category: category.to_string(),
             oracle,
+            kind: kind.to_string(),
+            index,
+            epoch: epoch.to_string(),
         }
     }
 }
@@ -743,6 +782,57 @@ pub fn compare_models_with(a: &[Record], b: &[Record], iters: usize) -> ModelCom
     }
 }
 
+/// The precomputation-detector result for one epoch (ADR-0009, Q29.1).
+#[derive(Clone, Debug)]
+pub struct DetectorReport {
+    pub epoch: String,
+    /// Families that had both an index-0 core and an index-0 probe unit to pair.
+    pub families_paired: usize,
+    pub sign: SignTest,
+}
+
+/// Run the precomputation detector over a journal (ADR-0009). Within each epoch, take
+/// each family's **pick-one** core bit (the index-0 core unit — the only collapse that
+/// preserves the null, Q29.1) and pair it with that family's index-0 fresh-probe bit; the
+/// one-sided sign test flags a family-paired core advantage. Returns one report per epoch
+/// that has at least one paired family. `threshold` is the accusation α (e.g.
+/// [`DETECTOR_ALPHA`]).
+pub fn detect(records: &[Record], threshold: f64) -> Vec<DetectorReport> {
+    // (core index-0 bit, probe index-0 bit) for one family.
+    type CoreProbe = (Option<bool>, Option<bool>);
+    // epoch -> family -> CoreProbe
+    let mut by: BTreeMap<String, BTreeMap<String, CoreProbe>> = BTreeMap::new();
+    for r in records {
+        if r.index != 0 {
+            continue; // pick-one: only the index-0 unit of each set
+        }
+        let slot = by
+            .entry(r.epoch.clone())
+            .or_default()
+            .entry(r.family().to_string())
+            .or_default();
+        match r.kind.as_str() {
+            "core" => slot.0 = Some(r.passed()),
+            "probe" => slot.1 = Some(r.passed()),
+            _ => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    for (epoch, fams) in by {
+        let pairs: Vec<(bool, bool)> = fams.values().filter_map(|&(c, p)| Some((c?, p?))).collect();
+        if pairs.is_empty() {
+            continue; // no family had both a core and a probe to pair
+        }
+        out.push(DetectorReport {
+            epoch,
+            families_paired: pairs.len(),
+            sign: sign_test(&pairs, threshold),
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1113,62 @@ mod tests {
             let de = c.design_effect.unwrap();
             assert!(de >= 1.0, "design effect must be >= 1, got {de}");
         }
+    }
+
+    #[test]
+    fn detector_flags_precomputation_and_clears_honest_runs() {
+        // Precompute signature: on every family the predictable core (index 0) passes
+        // while the fresh probe fails → one-directional core advantage → flagged.
+        let fams = ["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"];
+        let mut cheat = Vec::new();
+        for f in fams {
+            cheat.push(Record::synthetic_unit("c", f, "e", "core", 0, 1.0, true));
+            cheat.push(Record::synthetic_unit("c", f, "e", "probe", 0, 0.5, false));
+        }
+        let d = detect(&cheat, DETECTOR_ALPHA);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].families_paired, 8);
+        assert!(d[0].sign.flagged, "p={}", d[0].sign.p_value);
+        assert_eq!((d[0].sign.core_wins, d[0].sign.probe_wins), (8, 0));
+
+        // Honest run: core and probe agree (both pass) → no discordance → not flagged.
+        let mut honest = Vec::new();
+        for f in fams {
+            honest.push(Record::synthetic_unit("c", f, "e", "core", 0, 1.0, true));
+            honest.push(Record::synthetic_unit("c", f, "e", "probe", 0, 1.0, true));
+        }
+        let d = detect(&honest, DETECTOR_ALPHA);
+        assert!(!d[0].sign.flagged);
+    }
+
+    #[test]
+    fn detector_uses_pick_one_and_groups_by_epoch() {
+        // Non-index-0 core units must be ignored (pick-one), and separate epochs are
+        // reported separately.
+        let recs = vec![
+            Record::synthetic_unit("c", "f", "e1", "core", 0, 1.0, true),
+            Record::synthetic_unit("c", "f", "e1", "core", 1, 0.5, false), // ignored (index 1)
+            Record::synthetic_unit("c", "f", "e1", "probe", 0, 0.5, false),
+            Record::synthetic_unit("c", "f", "e2", "core", 0, 0.5, false),
+            Record::synthetic_unit("c", "f", "e2", "probe", 0, 0.5, false),
+        ];
+        let d = detect(&recs, DETECTOR_ALPHA);
+        assert_eq!(d.len(), 2, "two epochs → two reports");
+        let e1 = d.iter().find(|r| r.epoch == "e1").unwrap();
+        // e1: core index-0 passed, probe failed → one core win.
+        assert_eq!((e1.sign.core_wins, e1.sign.probe_wins), (1, 0));
+        let e2 = d.iter().find(|r| r.epoch == "e2").unwrap();
+        // e2: core and probe both failed → concordant → no discordance.
+        assert_eq!((e2.sign.core_wins, e2.sign.probe_wins), (0, 0));
+    }
+
+    #[test]
+    fn detector_empty_when_no_probe() {
+        let recs = vec![Record::synthetic_unit("c", "f", "e", "core", 0, 1.0, true)];
+        assert!(
+            detect(&recs, DETECTOR_ALPHA).is_empty(),
+            "no probe → nothing to pair"
+        );
     }
 
     #[test]

@@ -8,6 +8,29 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Closed the detector loop — `run-suite` → journal → `detect` verdict
+
+The sign test was a pure statistic with no journal reader; wired it to real journal data, so the
+precomputation detector now runs the full loop the run protocol emits.
+
+- `bench_stats::Record` gained `kind` / `index` / `epoch` (serde-defaulted for older journals) so core
+  and probe units can be told apart.
+- `bench_stats::detect(records, α)`: per epoch, take each family's **pick-one** core bit (the index-0
+  core unit — the only collapse preserving the null, Q29.1) and pair it with that family's index-0 fresh
+  probe; run the one-sided `sign_test`; return a `DetectorReport` per epoch (families paired, core/probe
+  wins, p, flagged). Non-index-0 core units are ignored (pick-one), epochs reported separately.
+- CLI `rustybench detect --journal <j>`.
+
+Demonstrated end-to-end on synthesised core+probe journals: a cheater (core passes / probe fails on all 8
+families) is **FLAGGED** at p=0.0039 < 0.01 (core-wins 8/0); an honest run (core = probe) is clean at
+p=1.0. On real data, `run-suite --seeds-probe N` emits the probe units and `detect` reads them — the
+whole ADR-0009 precomputation defence now closes.
+
+3 new tests (flag/clear, pick-one + epoch grouping, empty-when-no-probe); workspace 106; clippy/fmt
+clean. The detector fires on real data as soon as a `run-suite` epoch executes against a model.
+
+---
+
 ## 2026-08-20 · Run protocol — epoch orchestration with paired-core / fresh-probe + resume (P4)
 
 First increment of the run protocol (docs/08, ADR-0009): serve a whole epoch across all families instead
