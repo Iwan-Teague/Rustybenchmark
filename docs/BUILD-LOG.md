@@ -8,6 +8,31 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Live smoke run (Qwen2.5-3B on Metal) — whole loop end-to-end, and it caught a bug
+
+Ran the full pipeline against a real model for the first time: `llama-server` serving
+`Qwen2.5-3B-Instruct-Q4_K_M` on Metal, a 12-unit epoch (`run-suite`, 4 families × 2 core + 1 probe),
+then `stats` and `detect`. Resource note: a UTM/QEMU VM was at ~78% CPU, so this is a *capability/plumbing*
+smoke — the 3B runs on the free GPU, but grading is CPU-bound and would contend, so throughput is not
+reported as meaningful.
+
+Everything ran end-to-end: the model answered every unit, each was graded in the sandbox, journalled with
+epoch + core/probe labels, aggregated, and run through the detector. The 3B's honest capability profile:
+`iterators` **1.000 / pass 1.0** (both core seeds — it writes concise correct functional code),
+`borrow-lifetimes` 0.344, `error-handling` 0.222, `pattern-matching` 0.000; capability **0.392**,
+pass-rate 0.25. Detector: not flagged (p=0.5), as expected for an honest run.
+
+**The smoke caught a real correctness bug** — exactly what it is for. `stats` was scoring **12 units
+including the fresh probe**, when ADR-0009 says the probe is *never* scored. `iterators` read 0.803 /
+pass 0.667 (probe dragging it down) instead of the true core-only 1.000 / 1.000. Fixed: `report_with`
+and `compare_models_with` now filter to `kind == "core"` — the one place that rule is enforced for
+capability, pass-rate, CIs and ICC. The detector was already correct (it pairs only index-0 core+probe).
+Re-ran: 8 scored units, `iterators` 1.000/1.0, capability 0.392. Pinned with a test
+(`report_scores_core_only_never_probe`). Workspace 107; clippy/fmt clean. (Smoke journals live under the
+git-ignored `runs/`.)
+
+---
+
 ## 2026-08-20 · Closed the detector loop — `run-suite` → journal → `detect` verdict
 
 The sign test was a pure statistic with no journal reader; wired it to real journal data, so the

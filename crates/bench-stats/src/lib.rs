@@ -506,8 +506,17 @@ pub fn report(records: &[Record]) -> StatReport {
 
 /// As [`report`], with an explicit bootstrap resample count (tests use a smaller one).
 pub fn report_with(records: &[Record], iters: usize) -> StatReport {
-    let by_score = group_by(records, Record::score);
-    let by_pass = group_by(records, |r| if r.passed() { 1.0 } else { 0.0 });
+    // Only the paired **core** is scored — the fresh probe is the precomputation
+    // detector and never enters a published figure (ADR-0009). Filtering here is the
+    // one place that rule is enforced for capability, pass-rate, CIs and ICC.
+    let records: Vec<Record> = records
+        .iter()
+        .filter(|r| r.kind == "core")
+        .cloned()
+        .collect();
+
+    let by_score = group_by(&records, Record::score);
+    let by_pass = group_by(&records, |r| if r.passed() { 1.0 } else { 0.0 });
 
     let capability_score = equal_weight_overall(&by_score).unwrap_or(f64::NAN);
     let pass_rate = equal_weight_overall(&by_pass).unwrap_or(f64::NAN);
@@ -739,8 +748,10 @@ pub fn compare_models(a: &[Record], b: &[Record]) -> ModelComparison {
 }
 
 pub fn compare_models_with(a: &[Record], b: &[Record], iters: usize) -> ModelComparison {
+    // Compare on scored **core** units only; the probe is the detector (ADR-0009).
     let index = |recs: &[Record]| -> BTreeMap<String, bool> {
         recs.iter()
+            .filter(|r| r.kind == "core")
             .map(|r| (r.task_id.clone(), r.passed()))
             .collect()
     };
@@ -1160,6 +1171,26 @@ mod tests {
         let e2 = d.iter().find(|r| r.epoch == "e2").unwrap();
         // e2: core and probe both failed → concordant → no discordance.
         assert_eq!((e2.sign.core_wins, e2.sign.probe_wins), (0, 0));
+    }
+
+    #[test]
+    fn report_scores_core_only_never_probe() {
+        // One category, one family: two core units at 1.0 (pass) and a probe at 0.0
+        // (fail). Capability/pass must reflect the core only (ADR-0009) — the probe
+        // must not drag them down.
+        let recs = vec![
+            Record::synthetic_unit("c", "f", "e", "core", 0, 1.0, true),
+            Record::synthetic_unit("c", "f", "e", "core", 1, 1.0, true),
+            Record::synthetic_unit("c", "f", "e", "probe", 0, 0.0, false),
+        ];
+        let r = report_with(&recs, 200);
+        assert_eq!(r.units, 2, "probe unit excluded from the scored count");
+        assert!(
+            (r.capability_score - 1.0).abs() < 1e-9,
+            "got {}",
+            r.capability_score
+        );
+        assert!((r.pass_rate - 1.0).abs() < 1e-9, "got {}", r.pass_rate);
     }
 
     #[test]
