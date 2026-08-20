@@ -170,6 +170,14 @@ pub fn spec_diversity(gen: &dyn Generator, upto: u64) -> usize {
     seen.len()
 }
 
+/// The minimum [`spec_diversity`] a family must clear to ship — docs/17's
+/// "comfortably above [a per-epoch seed count of] 8". Provisional, like
+/// `bench_stats::CLUSTER_FLOOR`: the real value is fixed once Phase 4 sets the
+/// per-epoch seed count (docs/OPEN-QUESTIONS.md Q30/Q31). Enforced generically over
+/// [`FAMILY_IDS`] in this crate's tests; every current family clears it with
+/// headroom (the smallest ships at 12).
+pub const MIN_SPEC_DIVERSITY: usize = 8;
+
 /// Every registered family id. The run protocol serves these; keep it in sync with
 /// [`family`] (a test asserts every id here resolves).
 pub const FAMILY_IDS: &[&str] = &[
@@ -248,13 +256,6 @@ mod tests {
             );
         }
     }
-
-    /// The minimum spec-diversity a family must clear to ship — docs/17's
-    /// "comfortably above [a per-epoch seed count of] 8". Provisional, like
-    /// `bench_stats::CLUSTER_FLOOR`; the real floor is fixed once Phase 4 sets the
-    /// per-epoch seed count (Q30/Q31). Every current family clears it with headroom
-    /// (the smallest is 12).
-    const MIN_SPEC_DIVERSITY: usize = 8;
 
     #[test]
     fn every_family_meets_the_pure_construction_invariants() {

@@ -18,10 +18,11 @@ milliseconds rather than in the slow `validate-family` compile path:
 - **canary** — the prompt carries its `mint_canary` string;
 - **non-empty category** and **non-empty `spec_signature`** per seed, and the instance's `category`
   matches the family's;
-- **spec-diversity ≥ 8** — docs/17's "comfortably above a per-epoch seed count of 8", now a named
-  `MIN_SPEC_DIVERSITY` floor enforced generically (provisional, like `bench_stats::CLUSTER_FLOOR`; the real
-  value is fixed once Phase 4 sets the per-epoch count). Every current family clears it with headroom
-  (smallest is 12).
+- **spec-diversity ≥ 8** — docs/17's "comfortably above a per-epoch seed count of 8", now the public
+  `bench_gen::MIN_SPEC_DIVERSITY` floor enforced generically (provisional, like
+  `bench_stats::CLUSTER_FLOOR`; the real value is fixed once Phase 4 sets the per-epoch count). Every
+  current family clears it with headroom (smallest is 12). This turns Q30/Q31's open "per-family floor"
+  downstream note from *unspecified* into *provisionally enforced* — recorded there.
 
 Until now these lived only in each family's own hand-written tests and in the manual CLI gate, so a new
 family that simply *forgot* to add a canary or determinism test would pass CI. Now the registry itself is

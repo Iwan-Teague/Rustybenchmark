@@ -593,9 +593,14 @@ diversity count. Measured under this rule: `window-op` = **12** distinct skills 
 `error-handling` = **30** (5 combines × 6 rule-types). Both clear any per-epoch seed count, both pinned
 as regression tests.
 
-**Still open, downstream:** the per-family *floor* — the minimum spec-diversity a family must clear to
-ship — is not yet fixed; it depends on the per-epoch seed count chosen in Phase 4, and it folds back into
-[Q30](#q30--anti-twin-variance-is-per-family-not-global).
+**Still open, downstream — but now with a provisional floor.** The per-family *floor* — the minimum
+spec-diversity a family must clear to ship — is not yet *finally* fixed; it depends on the per-epoch seed
+count chosen in Phase 4, and it folds back into
+[Q30](#q30--anti-twin-variance-is-per-family-not-global). A **provisional floor of 8** (docs/17's
+"comfortably above 8") is now enforced generically in CI as `bench_gen::MIN_SPEC_DIVERSITY`, asserted over
+every family in `FAMILY_IDS` ([BUILD-LOG](BUILD-LOG.md) 2026-08-21) — so a too-narrow family fails
+`cargo test` today, and the constant is the single place to raise once Phase 4 sets the real value. Every
+family currently ships at ≥ 12.
 
 **Spec-collision rejection — built ([BUILD-LOG](BUILD-LOG.md) 2026-08-20).** `bench_gen::epoch` now has
 `plan_epoch_distinct_skills`, which serves `n` seeds covering `n` *distinct* skills (rejects a candidate
@@ -610,5 +615,7 @@ count.
 > skill within a run to estimate within-skill score variance. These are different serving policies for
 > different purposes. Likely resolution: an epoch serves distinct skills (coverage), and a *separate*
 > repeated-measures pass samples same-skill seeds for variance — but that is a Phase-4 decision, not
-> settled here. Until then `plan_epoch_distinct_skills` exists alongside the view-only `plan_epoch_from`;
-> neither is yet wired into a run protocol (there is no run protocol yet).
+> settled here. Until then `plan_epoch_distinct_skills` exists alongside the view-only `plan_epoch_from`.
+> The run protocol now exists (`run-suite`, [BUILD-LOG](BUILD-LOG.md) 2026-08-20) but serves on
+> `plan_run`'s seed-derived core/probe sets, not yet on either distinct-skills sampler — wiring the
+> coverage-vs-variance policy into it is the open Phase-4 decision above.
