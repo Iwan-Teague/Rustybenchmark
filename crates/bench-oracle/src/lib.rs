@@ -124,13 +124,20 @@ pub fn grade(
         flags.push("timeout:test".into());
     }
     let unit = parse_test_summary(&test.stdout).or_else(|| parse_test_summary(&test.stderr));
-    let unit_score = unit.map(|(passed, total)| {
-        if total == 0 {
-            0.0
-        } else {
-            passed as f32 / total as f32
+    // A configured behaviour stage that yields no summary means the test target
+    // did not build against this answer (e.g. it changed a required interface,
+    // or it timed out). That is a behaviour *failure* scored 0.0 — never absent,
+    // or a non-conforming answer would inflate its score on the remaining layers.
+    let unit_score = match unit {
+        Some((_, 0)) => Some(0.0),
+        Some((passed, total)) => Some(passed as f32 / total as f32),
+        None => {
+            if !test.timed_out {
+                flags.push("behavior:no_summary".into());
+            }
+            Some(0.0)
         }
-    });
+    };
 
     let mut behavior = BehaviorScore {
         unit: unit_score,
@@ -147,8 +154,14 @@ pub fn grade(
         }
         behavior.differential =
             match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
-                Some((passed, total)) if total > 0 => Some(passed as f32 / total as f32),
-                _ => None,
+                Some((_, 0)) => Some(0.0),
+                Some((passed, total)) => Some(passed as f32 / total as f32),
+                None => {
+                    if !out.timed_out {
+                        flags.push("differential:no_summary".into());
+                    }
+                    Some(0.0)
+                }
             };
     }
     behavior.recompute();
@@ -170,11 +183,17 @@ pub fn grade(
                         .push("alloc: hot path allocated".into());
                 }
             }
-            // The allocation target failed to build or ran nothing — we could
-            // not measure. Record it rather than guessing a verdict.
-            _ => constraint
-                .violations
-                .push("alloc: test target did not run".into()),
+            // The allocation target did not build against this answer — the
+            // answer does not conform, so it fails the check (not "absent").
+            _ => {
+                constraint.alloc_ok = Some(false);
+                constraint
+                    .violations
+                    .push("alloc: test target did not run".into());
+                if !out.timed_out {
+                    flags.push("alloc:no_summary".into());
+                }
+            }
         }
         constraint.recompute();
     }

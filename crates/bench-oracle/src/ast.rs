@@ -65,6 +65,7 @@ struct PathFinder<'a> {
 
 impl<'ast, 'a> Visit<'ast> for PathFinder<'a> {
     fn visit_path(&mut self, node: &'ast syn::Path) {
+        // Type/function paths: `RefCell::new`, `std::mem::transmute`, `panic!`.
         for seg in &node.segments {
             let id = seg.ident.to_string();
             if self.forbidden.iter().any(|f| f == &id) {
@@ -72,6 +73,16 @@ impl<'ast, 'a> Visit<'ast> for PathFinder<'a> {
             }
         }
         visit::visit_path(self, node);
+    }
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        // Method calls: `.unwrap()`, `.expect(...)` — not paths, but the same
+        // "forbidden API" intent. Catching these is what makes the constraint
+        // usable for error-handling ("propagate, don't panic").
+        let m = node.method.to_string();
+        if self.forbidden.iter().any(|f| f == &m) {
+            self.hits.push(m);
+        }
+        visit::visit_expr_method_call(self, node);
     }
 }
 
@@ -109,6 +120,17 @@ mod tests {
     #[test]
     fn empty_forbidden_list_is_noop() {
         assert_eq!(find_forbidden_paths("fn f() {}", &[]), Some(Vec::new()));
+    }
+
+    #[test]
+    fn catches_method_calls_not_just_paths() {
+        // `.unwrap()` is a method call, not a path — the error-handling constraint.
+        let code = "fn f(s: &str) -> i64 { s.parse::<i64>().unwrap() }";
+        let hits = find_forbidden_paths(code, &["unwrap".to_string()]).unwrap();
+        assert!(
+            hits.contains(&"unwrap".to_string()),
+            "should catch .unwrap(): {hits:?}"
+        );
     }
 
     #[test]

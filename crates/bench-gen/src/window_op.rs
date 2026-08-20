@@ -372,6 +372,7 @@ impl Generator for WindowOpFamily {
             differential_test: "differential".to_string(),
             alloc_test: "alloc".to_string(),
             max_unsafe: 0,
+            forbidden_paths: Vec::new(),
             weights: (0.35, 0.55, 0.10),
         }
     }

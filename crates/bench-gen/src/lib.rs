@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod distance;
+pub mod error_handling;
 pub mod window_op;
 
 /// Derive an instance seed from the epoch, task id and index (docs/02):
@@ -88,6 +89,8 @@ pub struct GeneratedTask {
     pub alloc_test: String,
     /// L3 AST constraint.
     pub max_unsafe: u32,
+    /// L3 AST constraint: forbidden type/function/method names.
+    pub forbidden_paths: Vec<String>,
     /// Per-category weights (behavior, constraint, quality).
     pub weights: (f32, f32, f32),
 }
@@ -134,6 +137,7 @@ pub trait Generator {
 pub fn family(id: &str) -> Option<Box<dyn Generator>> {
     match id {
         "window-op" => Some(Box::new(window_op::WindowOpFamily)),
+        "error-handling" => Some(Box::new(error_handling::ErrorHandlingFamily)),
         _ => None,
     }
 }

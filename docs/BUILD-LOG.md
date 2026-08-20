@@ -8,6 +8,74 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P3 — second family (`error-handling`): seeding generalises, and two oracle bugs it caught
+
+**The question this answers.** The docs' biggest open risk (Q3, R2-S6): does
+solution-first seeding generalise beyond `window-op`'s in-place-mutation shape,
+or collapse to cosmetic variation? A second family in a genuinely different
+shape settles it.
+
+**`error-handling`** (category `error-handling`): parse `&[&str]` into `i64`,
+validate each against a seed-selected rule (non-negative / at-most-N / non-zero),
+combine with a seed-selected operation (sum / product / sum-of-abs), returning
+`Result<i64, ParseError>` with `?` propagation. Different machinery entirely —
+error paths, a custom enum the model must keep, string parsing. Its constraint is
+error-handling-specific: **no `.unwrap()` / `.expect()`** (propagate, don't
+panic), which needed the AST forbidden-path check extended to match *method
+calls*, not just type paths.
+
+**Verdict: seeding generalises.** All five construction gates pass across every
+seed — reference 1.000, skeleton fails, both trivial baselines caught (including
+the `.unwrap()` one, proving the extended AST check), canary present, determinism.
+The reference-passes-its-own-oracle gate confirms the generator is self-consistent
+for this shape too.
+
+**But the anti-twin numbers are a real, quantified caveat:**
+
+| family | min | median | near-twins |
+|---|---|---|---|
+| window-op | 0.122 | 0.433 | 7/45 |
+| **error-handling** | **0.042** | **0.263** | **18/45** |
+
+Error-handling instances are markedly *more similar* — median 0.263 vs 0.433,
+barely above the near-twin threshold. The cause is structural: the shared
+boilerplate (the `ParseError` enum, the parse-propagate skeleton, the constraint
+list) dominates the prompt, so the seed-varied part (op + rule) is a small
+fraction of what the model sees. **Solution-first seeding generalises in
+correctness but not automatically in variance** — a family with heavy fixed
+scaffolding needs a larger variable surface, or a per-category anti-twin
+threshold. That is a concrete design conclusion for the 272-family plan, and it
+is the honest answer to Q3: *yes, but variance must be designed for, not
+assumed.*
+
+**Two oracle bugs, both found by running the second family — not by review.**
+
+1. **Score inflation on non-conforming answers.** The live 3B rewrote the
+   provided enum as *private* and dropped `#[derive(PartialEq)]`. The lib still
+   compiled (a private enum is legal), so L1 passed — but the behaviour and
+   differential test targets could not build against it (`E0603`, `E0369`), so
+   they produced no summary, which the oracle recorded as `None`. The composite
+   then renormalised over the *remaining* layers and scored the broken answer
+   **1.000**. Fixed: a configured test that yields no summary is a **failure
+   (0.0)**, never absent, and flags `behavior:no_summary` / `differential:no_summary`.
+   The same answer now scores **0.222** — behaviour 0, with only the style
+   constraint contributing. (That 0.222 for a non-functional-but-tidy answer
+   reinforces the Q28 "should behaviour be a hard floor" question already on
+   file; it is the documented weighting, not a new bug.)
+2. **Empty test target treated as configured.** A family opts out of the alloc
+   layer by leaving its target blank; the CLI wrapped `""` as `Some("")`, so the
+   oracle ran `cargo test --test ""`, failed, and (after fix 1) scored it a
+   constraint failure — which broke `error-handling` validation. Fixed: empty
+   target → `None`.
+
+Window-op could not have surfaced either: its answers conform to a fixed
+signature with no enum, so the interface-mismatch path was never exercised. This
+is precisely why a second family of a *different shape* was the right next step.
+
+52 tests across seven crates; clippy clean under `-D warnings`; fmt clean.
+
+---
+
 ## 2026-08-19 · P3 — anti-twin distance + trivial-baseline gates
 
 **What.** The gate that actually tests the project's central claim — that

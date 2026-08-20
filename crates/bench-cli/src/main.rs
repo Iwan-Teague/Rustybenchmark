@@ -205,6 +205,16 @@ fn load_generated(fam: &str, seed: u64) -> Result<Task, Box<dyn std::error::Erro
     Ok(task_from_generated(&g.generate(seed)))
 }
 
+/// Map an empty test-target name to `None` (a family opts out of a layer by
+/// leaving its target blank).
+fn non_empty(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 fn task_from_generated(gt: &bench_gen::GeneratedTask) -> Task {
     Task {
         id: gt.id.clone(),
@@ -218,11 +228,11 @@ fn task_from_generated(gt: &bench_gen::GeneratedTask) -> Task {
             constraint: gt.weights.1,
             quality: gt.weights.2,
         },
-        behavior_test: Some(gt.behavior_test.clone()),
-        differential_test: Some(gt.differential_test.clone()),
-        alloc_test: Some(gt.alloc_test.clone()),
+        behavior_test: non_empty(&gt.behavior_test),
+        differential_test: non_empty(&gt.differential_test),
+        alloc_test: non_empty(&gt.alloc_test),
         max_unsafe: Some(gt.max_unsafe),
-        forbidden_paths: Vec::new(),
+        forbidden_paths: gt.forbidden_paths.clone(),
     }
 }
 
