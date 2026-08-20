@@ -122,11 +122,42 @@ pub struct Instance {
 /// them short-circuits: a solution that does not compile has no behaviour score.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BehaviorScore {
+    /// Fraction of hidden example tests passed.
     pub unit: Option<f32>,
+    /// Fraction of invariant properties held.
     pub property: Option<f32>,
+    /// Agreement with the hidden reference over generated inputs. This is what
+    /// catches a solution that passes every visible test and is still wrong —
+    /// unit tests overstate correctness by 30–32% (docs/01, docs/03).
     pub differential: Option<f32>,
     /// Weighted combination of whichever sub-oracles ran, in [0, 1].
     pub score: Option<f32>,
+}
+
+impl BehaviorScore {
+    /// Recompute `score` from the sub-oracles that ran, using the docs/03
+    /// weights (unit 0.3 / property 0.5 / differential 0.2) renormalised over
+    /// those present. `None` if none ran.
+    pub fn recompute(&mut self) {
+        const W_UNIT: f32 = 0.3;
+        const W_PROP: f32 = 0.5;
+        const W_DIFF: f32 = 0.2;
+        let mut num = 0.0f32;
+        let mut den = 0.0f32;
+        if let Some(u) = self.unit {
+            num += W_UNIT * u;
+            den += W_UNIT;
+        }
+        if let Some(p) = self.property {
+            num += W_PROP * p;
+            den += W_PROP;
+        }
+        if let Some(d) = self.differential {
+            num += W_DIFF * d;
+            den += W_DIFF;
+        }
+        self.score = (den > f32::EPSILON).then(|| num / den);
+    }
 }
 
 /// Constraint layer (L3). Each check is optional — it contributes to the layer
@@ -390,6 +421,36 @@ mod tests {
             behav_dom > s + 0.3,
             "constraint weighting must move the score: {behav_dom} vs {s}"
         );
+    }
+
+    #[test]
+    fn differential_catches_unit_passing_but_wrong() {
+        // The headline: a solution that passes every example test (unit 1.0) but
+        // disagrees with the reference (differential 0.0). docs/03 weights make
+        // behaviour 0.6, not the 1.0 a unit-only oracle would report.
+        let mut b = BehaviorScore {
+            unit: Some(1.0),
+            differential: Some(0.0),
+            ..Default::default()
+        };
+        b.recompute();
+        // (0.3*1 + 0.2*0) / (0.3 + 0.2) = 0.6
+        assert!((b.score.unwrap() - 0.6).abs() < 1e-4, "got {:?}", b.score);
+    }
+
+    #[test]
+    fn behavior_score_renormalises_over_present_suboracles() {
+        // unit only: behaviour == unit.
+        let mut b = BehaviorScore {
+            unit: Some(0.8),
+            ..Default::default()
+        };
+        b.recompute();
+        assert!((b.score.unwrap() - 0.8).abs() < 1e-6);
+        // none ran: None.
+        let mut empty = BehaviorScore::default();
+        empty.recompute();
+        assert_eq!(empty.score, None);
     }
 
     #[test]

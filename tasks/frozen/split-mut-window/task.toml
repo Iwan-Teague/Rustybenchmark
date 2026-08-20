@@ -14,4 +14,5 @@ quality = 0.10
 
 [oracle]
 behavior_test = "behavior"
+differential_test = "differential"
 alloc_test = "alloc"

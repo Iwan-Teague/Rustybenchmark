@@ -35,6 +35,9 @@ pub struct GradeSpec<'a> {
     /// The `cargo test --test <name>` target for the L2 behaviour tests. `None`
     /// runs every test, which is fine when the task has no separate L3 target.
     pub behavior_test: Option<&'a str>,
+    /// The `cargo test --test <name>` target for the L2 differential sub-oracle
+    /// (candidate vs hidden reference over generated inputs). `None` skips it.
+    pub differential_test: Option<&'a str>,
     /// The `cargo test --test <name>` target carrying the L3 allocation
     /// instrumentation. `None` skips the constraint layer.
     pub alloc_test: Option<&'a str>,
@@ -109,12 +112,23 @@ pub fn grade(
         }
     });
 
-    let behavior = BehaviorScore {
+    let mut behavior = BehaviorScore {
         unit: unit_score,
         property: None,
         differential: None,
-        score: unit_score,
+        score: None,
     };
+
+    // ---- L2 differential: candidate vs hidden reference over generated inputs ----
+    if let Some(name) = spec.differential_test {
+        let out = run_cargo(workspace, &["test", "--test", name, "--offline", "--quiet"])?;
+        behavior.differential =
+            match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
+                Some((passed, total)) if total > 0 => Some(passed as f32 / total as f32),
+                _ => None,
+            };
+    }
+    behavior.recompute();
 
     // ---- L3: constraint (allocation) ----
     let mut constraint = ConstraintScore::default();
@@ -139,9 +153,9 @@ pub fn grade(
         constraint.recompute();
     }
 
-    // Failure class, most-specific first: compiled, so it is a behaviour, then
-    // constraint, then clean.
-    let failure_class = if unit_score.map(|s| s < 1.0).unwrap_or(true) {
+    // Failure class, most-specific first: compiled, so it is a behaviour (unit
+    // or differential), then constraint, then clean.
+    let failure_class = if behavior.score.map(|s| s < 1.0).unwrap_or(true) {
         FailureClass::Logic
     } else if constraint.score.map(|s| s < 1.0).unwrap_or(false) {
         FailureClass::Constraint

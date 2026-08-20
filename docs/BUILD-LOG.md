@@ -8,6 +8,42 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P2 (partial) — L2 differential sub-oracle
+
+**What.** The other half of the P2 exit criterion: *"a deliberately-wrong-but-
+tests-passing solution is caught by the property oracle."* The hidden oracle
+ships a differential target (`tests/differential.rs`) carrying a known-correct
+reference and a seeded LCG generator; it compares the candidate against the
+reference over 3000 inputs including widths ≥ 3 that the example tests never
+exercise. `behavior.score` now combines unit + differential with the docs/03
+weights (unit 0.3 / property 0.5 / differential 0.2, renormalised over those
+present). No external crate — the LCG keeps grading deterministic and offline;
+`proptest` is the P2-proper upgrade once dep-vendoring is set up.
+
+**The headline, measured end to end:**
+
+| response | unit | differential | behavior | constraint | score | failure_class |
+|---|---|---|---|---|---|---|
+| correct | 1.0 | 1.0 | 1.0 | ok | **1.000** | none |
+| **subtlebug** (swaps only window ends) | **1.0** | **0.0** | 0.6 | ok | **0.844** | **logic** |
+| clone-everything | 1.0 | 1.0 | 1.0 | fail | 0.389 | constraint |
+| logic-fail (whole-slice reverse) | 0.2 | 0.0 | 0.12 | ok | 0.658 | logic |
+
+The `subtlebug` row is the point. It passes **all five example tests** — a
+`unit` of **1.0**, a perfect score under any unit-only oracle — but it only
+swaps the first two elements of each window, so it is wrong for every width ≥ 3,
+which no example covers. The differential oracle catches it (`differential` 0.0),
+dropping behaviour to 0.6 and the composite to 0.844, and flipping
+`failure_class` from `none` to `logic`. **Without the differential oracle this
+wrong solution would score a perfect 1.000.** That is the 30–32%-overstatement
+finding (docs/01) fixed with real toolchain execution.
+
+**Deferred within L2:** the property sub-oracle (metamorphic invariants) and
+`proptest` shrinking of the first failing input. `differential` alone already
+delivers the exit criterion.
+
+---
+
 ## 2026-08-19 · First real model — llama-server + Qwen2.5-3B-Instruct-Q4_K_M
 
 **What.** The first non-mock run: `rustybench run` against a live `llama-server`

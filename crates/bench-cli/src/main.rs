@@ -71,6 +71,7 @@ struct Weights {
 #[derive(Deserialize, Default)]
 struct OracleCfg {
     behavior_test: Option<String>,
+    differential_test: Option<String>,
     alloc_test: Option<String>,
 }
 
@@ -186,6 +187,7 @@ fn run(
         answer_path: Path::new(&manifest.answer_path),
         weights: &weights,
         behavior_test: ocfg.behavior_test.as_deref(),
+        differential_test: ocfg.differential_test.as_deref(),
         alloc_test: ocfg.alloc_test.as_deref(),
     };
 
@@ -219,10 +221,12 @@ fn run(
     append_journal(out, &line)?;
 
     println!(
-        "  score {:.3}  apply={} compile={} behavior={:?} constraint={:?} failure={:?}",
+        "  score {:.3}  apply={} compile={} unit={:?} diff={:?} behavior={:?} constraint={:?} failure={:?}",
         vector.score,
         vector.apply_ok,
         vector.compile_ok,
+        vector.behavior.unit,
+        vector.behavior.differential,
         vector.behavior.score,
         vector.constraint.score,
         vector.failure_class
