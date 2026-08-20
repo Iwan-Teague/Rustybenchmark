@@ -8,6 +8,52 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Eighth family: `raw-ptr` (category `unsafe-core`) — with an honest miri caveat
+
+`unsafe-core` is docs/04 core #5, and this covers it — bringing core coverage to **4 of 5**
+(`borrow-lifetimes`, `error-handling`, `traits-generics`, `unsafe-core`; only `idiom-refactor`, which
+needs the compositional/inverse-transform archetype, remains). The model implements
+`fn f(ptr: *const i64, len: usize) -> i64`, and **`unsafe` is forced by the signature** — there is no
+safe way to dereference a `*const i64`, so a scoring answer must contain `unsafe { *ptr.add(i) }` (or
+`from_raw_parts`). That is the genuine article, not unsafe-as-decoration.
+
+Seed-selected on two axes — **access pattern** (Forward / EveryOther / OddIndices / FirstHalf, each a
+different pointer-arithmetic walk) × **reduce** (Sum / Product / SumOfSquares / SumOfAbs / SumOfPositives)
+= **20 distinct skills**. Solution-first and correct-by-construction (ADR-0003) via *three* mirrors of one
+index-walk: the native `eval`, the emitted **unsafe** reference (reads through the pointer), and the
+differential's **safe** reference (indexes a slice). The differential passes `xs.as_ptr()` / `xs.len()`
+into the model's `f` and compares against the safe reference over 3000 bounded slices; the access-pattern
+axis is what makes the patterns behaviourally distinct (each selects a different index *subset*, not just
+a different order, so the reductions genuinely differ). `validate-family --seeds 8`, all gates green:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+view       min=0.288 median=0.406 near-twins 0/28
+reference  min=0.176 median=0.429 near-twins 1/28   capacity=18
+spec-diversity: 20 distinct skills
+```
+
+Both trivial baselines are constants (`const-zero`, `const-one`) — same reasoning as `trait-impl`: any
+*shaped* degenerate (first-element, length) coincides with one real spec on the canonical input `[3,1,4,2]`,
+whose answer is provably never 0 or 1 under all 20 combos (pinned as a test, which also checks every
+pattern selects ≥ 2 elements).
+
+**The honest caveat, stated loudly rather than buried.** docs/04 makes **miri mandatory** for this
+category — "UB = hard behavior failure" — and the miri layer does not exist yet (roadmap P7). Behaviour +
+the differential catch *wrong* answers and gross out-of-bounds (a value mismatch, or a crash the sandbox
+records), but **not** subtle unsoundness that still returns the right values on the fuzzed inputs (a
+provenance violation, say). So today this family grades on behaviour + differential only. It is
+correct-by-construction and passes every construction gate now; when miri lands it slots into the empty
+constraint slot (the family already carries docs/04's behaviour 0.70 / constraint 0.30 weights). Authoring
+the family ahead of its full oracle is the deliberate call — the generator is the long pole, and a
+gate-valid `unsafe-core` family in hand is worth more than a placeholder, provided the gap is on the
+record. It is.
+
+Registered in `FAMILY_IDS` and the `spec_diversity` pin (== 20) in the same commit. 131 workspace tests
+(+6); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-20 · Seventh family: `bit-ops` (category `bit-manipulation`)
 
 More corpus breadth (roadmap P7), and a deliberately *low-level* shape — no arithmetic fold anywhere. The

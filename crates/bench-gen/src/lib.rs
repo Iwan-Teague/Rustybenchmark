@@ -23,6 +23,7 @@ pub mod grid_reduce;
 pub mod seq_transform;
 pub mod stack_machine;
 pub mod traits_generics;
+pub mod unsafe_core;
 pub mod window_op;
 
 /// Derive an instance seed from the epoch, task id and index (docs/02):
@@ -172,6 +173,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "grid-reduce",
     "trait-impl",
     "bit-ops",
+    "raw-ptr",
 ];
 
 /// Look up a family by id.
@@ -184,6 +186,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "grid-reduce" => Some(Box::new(grid_reduce::GridReduceFamily)),
         "trait-impl" => Some(Box::new(traits_generics::TraitsGenericsFamily)),
         "bit-ops" => Some(Box::new(bit_manipulation::BitManipulationFamily)),
+        "raw-ptr" => Some(Box::new(unsafe_core::UnsafeCoreFamily)),
         _ => None,
     }
 }
@@ -267,6 +270,11 @@ mod tests {
         // bit-ops = 5 masks x 4 transforms.
         assert_eq!(
             spec_diversity(family("bit-ops").unwrap().as_ref(), 4000),
+            20
+        );
+        // raw-ptr = 4 access patterns x 5 reductions.
+        assert_eq!(
+            spec_diversity(family("raw-ptr").unwrap().as_ref(), 4000),
             20
         );
     }
