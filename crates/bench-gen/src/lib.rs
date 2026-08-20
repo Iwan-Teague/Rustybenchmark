@@ -18,6 +18,7 @@ use std::path::PathBuf;
 pub mod distance;
 pub mod epoch;
 pub mod error_handling;
+pub mod seq_transform;
 pub mod stack_machine;
 pub mod window_op;
 
@@ -164,6 +165,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "window-op" => Some(Box::new(window_op::WindowOpFamily)),
         "error-handling" => Some(Box::new(error_handling::ErrorHandlingFamily)),
         "stack-machine" => Some(Box::new(stack_machine::StackMachineFamily)),
+        "seq-transform" => Some(Box::new(seq_transform::SeqTransformFamily)),
         _ => None,
     }
 }
@@ -217,6 +219,10 @@ mod tests {
         assert_eq!(
             spec_diversity(family("stack-machine").unwrap().as_ref(), 4000),
             40
+        );
+        assert_eq!(
+            spec_diversity(family("seq-transform").unwrap().as_ref(), 4000),
+            48
         );
     }
 }

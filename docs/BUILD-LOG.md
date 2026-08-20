@@ -41,6 +41,30 @@ per-category cluster floor need the Q24 shape audit; the real ICC needs Phase 3.
 
 ---
 
+## 2026-08-20 · Fourth family: `seq-transform` (category `iterators`)
+
+A fourth family, authored against [17-authoring-families.md](17-authoring-families.md) with `stack-machine` as the
+closest template: the model implements `transform(xs: &[i64]) -> Vec<i64>`, applying a **seed-selected
+three-stage pipeline** — Filter (Positive / Even / AboveThreshold(t) / NonZero) → Map (Double / Negate /
+Square / AddK(k)) → Terminal (Collect / RunningSum / DedupConsecutive). Native `eval` and the emitted
+reference are mirrored one-to-one; the differential fuzzes 3000 random slices (values ∈ -9..=9, length
+0..12, so no debug-build overflow); a fixed canonical case `[2, 5, 8]` is changed and rendered non-empty
+by **every** combination — including every threshold `t` and constant `k` — so both trivial baselines
+(`identity`, `empty`) fail on every seed. The structural surface is 4 × 4 × 3 = **48 distinct skills**,
+the widest of the four families; `t`, `k` and the function name are excluded from `spec_signature` (Q31).
+
+```
+view       min=0.392 median=0.591 near-twins 0/28
+reference  min=0.286 median=0.545 near-twins 0/28   capacity=43
+spec-diversity: 48 distinct skills
+distinct-skills epoch: served 8 covering 8 distinct skills
+```
+
+`cargo test -p bench-gen` — 40 passed (incl. `spec_diversity == 48`); `validate-family --seeds 8` — all
+gates green; clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-20 · Authoring guide (doc 17) + README refresh
 
 With three families now sharing a stable pattern, distilled it into [17-authoring-families.md](17-authoring-families.md):
