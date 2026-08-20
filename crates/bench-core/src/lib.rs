@@ -267,6 +267,34 @@ impl OracleVector {
             flags: Vec::new(),
         }
     }
+
+    /// The pre-registered **pass predicate** (docs/07-statistics.md, Q28). A task
+    /// is *solved* iff it applied (L0), compiled (L1), is behaviourally correct
+    /// (every L2 test passed, so `behavior.score == 1.0`), and satisfies the hard
+    /// L3 constraints it declared — no disallowed `unsafe`, no forbidden path, and
+    /// the allocation budget met.
+    ///
+    /// This is deliberately **structural, not a threshold on `composite_score`**.
+    /// It is binary and *weight-independent*: re-tuning the per-category composite
+    /// weights cannot move pass rates, which removes the cut-sweeping that made a
+    /// score threshold gameable (REVIEW-6: 23.3% type-I error from a swept cut).
+    /// The continuous `composite_score` remains the capability headline; `passed`
+    /// feeds only the binary consumers (throughput, time-to-first-pass, McNemar,
+    /// the sign-test detector, `budget_exhausted`).
+    ///
+    /// Semantics of the constraint clauses: a check that did not run (`None`) is
+    /// *not* a barrier — the family did not require it. Only an explicit `false`
+    /// fails the task. Quality checks (clippy/fmt, and L4) are **not** part of pass.
+    /// A task with no behaviour oracle at all cannot pass — there is nothing that
+    /// confirmed it correct.
+    pub fn passed(&self) -> bool {
+        self.apply_ok
+            && self.compile_ok
+            && self.behavior.score == Some(1.0)
+            && self.constraint.unsafe_ok != Some(false)
+            && self.constraint.paths_ok != Some(false)
+            && self.constraint.alloc_ok != Some(false)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +466,38 @@ mod tests {
             behav_dom > s + 0.3,
             "constraint weighting must move the score: {behav_dom} vs {s}"
         );
+    }
+
+    #[test]
+    fn pass_is_structural_and_weight_independent() {
+        // Full marks on behaviour, no constraint declared → pass.
+        assert!(vector(Some(1.0), None).passed());
+        // Behaviourally imperfect → not a pass, however high the composite is.
+        assert!(!vector(Some(0.8), None).passed());
+        // The clone-everything case: behaviour 1.0 but the allocation constraint
+        // failed (alloc_ok = Some(false)) → NOT a pass, and this holds regardless
+        // of the composite weights. This is the Q28 thesis in one assertion.
+        assert!(!vector(Some(1.0), Some(0.0)).passed());
+        // Behaviour 1.0 with the constraint satisfied → pass.
+        assert!(vector(Some(1.0), Some(1.0)).passed());
+    }
+
+    #[test]
+    fn pass_requires_a_behaviour_oracle_and_the_gates() {
+        // No behaviour ran → cannot be confirmed correct → not a pass.
+        assert!(!vector(None, None).passed());
+        // Did not compile → not a pass even with a (stale) behaviour score.
+        let mut v = vector(Some(1.0), None);
+        v.compile_ok = false;
+        assert!(!v.passed());
+        // A constraint that did not run (None) is not a barrier: an unsafe_ok of
+        // None must not block a pass.
+        let mut v = vector(Some(1.0), None);
+        v.constraint.unsafe_ok = None;
+        assert!(v.passed());
+        // An explicit forbidden-path violation fails the task.
+        v.constraint.paths_ok = Some(false);
+        assert!(!v.passed());
     }
 
     #[test]

@@ -8,6 +8,39 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Q28 + Q29 decided — the pass predicate and the estimation spec
+
+Worked through the two blocking statistical questions with the user and wrote the decisions into code and
+[07-statistics.md](07-statistics.md).
+
+**Q28 — the pass predicate is structural, not a threshold.** A task passes iff
+`applied ∧ compiled ∧ behaviour == 1.0 ∧ (unsafe_ok ∧ paths_ok ∧ alloc_ok)`, where a constraint the family
+did not declare is not a barrier and quality (clippy/fmt, L4) is excluded. Binary, weight-independent
+(re-tuning composite weights cannot move pass rates — kills REVIEW-6's swept-cut 23.3% type-I), and
+pre-registered because it defines "correct" rather than tuning a cutoff. A clone-everything answer fails
+`borrow-lifetimes` by the alloc clause. Implemented as `OracleVector::passed()` in `bench-core` (+2 tests);
+the continuous `capability_score` stays the headline, `passed` feeds only the six binary consumers.
+
+**Q29 — the estimation spec, resolved around one reframe:** the published CI is *always* the cluster
+bootstrap; the design-effect formula and ICC are sizing/diagnostic only (so a bad/negative ICC can't
+narrow a published interval). Decisions written into doc 07:
+
+- **Bootstrap unit = coarsest cluster** — shapes once labelled (needs Q24), family-level and flagged as
+  under-covering until then; `idiom-refactor` is crossed → directional-only.
+- **Few clusters → wild cluster bootstrap** (Cameron–Gelbach–Miller), coverage validated by simulation;
+  categories below a cluster floor are directional-only (fixes the 92%/84% under-coverage).
+- **ICC** — variance-components, clamped to [0,1], `design_effect = max(1, …)`, empirical-Bayes shrink
+  toward pooled; diagnostic/sizing only.
+- **Precomputation sign test → pick-one collapse** (core seed index 0): the only rule preserving the null
+  (`any` 100% / `majority` 54% / `pick-one` 4.2% false-accusation).
+- **Multiplicity → FWER**: simultaneous radar CIs at 1−0.05/11, Holm for pairwise model comparisons; FDR
+  considered and rejected for a public leaderboard.
+
+Both marked DECIDED in OPEN-QUESTIONS. Residual dependencies noted: the shape-level bootstrap and the
+per-category cluster floor need the Q24 shape audit; the real ICC needs Phase 3.5. `bench-core` 14 tests.
+
+---
+
 ## 2026-08-20 · Authoring guide (doc 17) + README refresh
 
 With three families now sharing a stable pattern, distilled it into [17-authoring-families.md](17-authoring-families.md):

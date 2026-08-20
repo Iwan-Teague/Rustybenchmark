@@ -408,7 +408,7 @@ Options: require cache-disabling flags where the backend supports them and recor
 
 ---
 
-## Q28 — Define the pass predicate on `task_score` · **BLOCKING**
+## Q28 — Define the pass predicate on `task_score` · **DECIDED (structural pass)**
 
 **Blocks:** `bench-stats`, and three published metrics. Raised by [REVIEW-6.md](REVIEW-6.md).
 
@@ -418,9 +418,19 @@ Six consumers each currently assume their own implicit threshold: `throughput_sc
 
 Defining it once will silently change all six. An analyst sweeping plausible cuts gets **23.3% type-I error** and can move the reported effect size by a median 7 points, so the cut must be pre-registered, not chosen.
 
+**Decided 2026-08-20: a structural pass predicate, not a threshold on `task_score`.** A task passes iff it
+**applied ∧ compiled ∧ behaviour == 1.0 ∧ (unsafe_ok ∧ paths_ok ∧ alloc_ok)** — where an L3 constraint the
+family did not declare (`None`) is not a barrier, and quality (clippy/fmt, L4) is excluded. This is binary,
+**weight-independent** (re-tuning composite weights cannot move pass rates, which kills the swept-cut type-I
+inflation), and pre-registered by construction because it is a definition of "correct", not a tuned number.
+A clone-everything answer fails `borrow-lifetimes` by the constraint clause — the category thesis enforced
+as a hard fact. The continuous `capability_score` stays the headline; `passed` feeds only the six binary
+consumers. Implemented as `OracleVector::passed()` in `bench-core`; specified in
+[07-statistics.md](07-statistics.md#the-pass-predicate).
+
 ---
 
-## Q29 — The statistical machinery is undefined, not mis-tuned
+## Q29 — The statistical machinery is undefined, not mis-tuned · **DECIDED**
 
 **Blocks:** `bench-stats` (roadmap P4). Raised by [REVIEW-6.md](REVIEW-6.md).
 

@@ -2,6 +2,38 @@
 
 This document decides how many task families exist, how many seeds each gets, how many times a model is sampled, and what confidence can honestly be claimed. Every one of those is the same question: how to spend a fixed compute budget for the tightest unbiased estimate.
 
+## The pass predicate
+
+`task_score` is continuous on [0, 1] — the right signal for the **capability** headline, but the wrong
+*type* for the six consumers that need a yes/no: `throughput_score` ("tasks passed per hour"),
+`time_to_first_pass`, McNemar model comparison, the sign-test precomputation detector, the probe
+discordance calibration, and `budget_exhausted_rate`.
+
+**Pass is defined structurally, not as a threshold on `task_score`** (Q28, pre-registered). A task is
+*solved* iff, in order:
+
+1. it **applied** (L0 — the answer was extractable), and
+2. it **compiled** (L1), and
+3. it is **behaviourally correct** — the L2 behaviour score is exactly `1.0` (every unit, property and
+   differential check passed), and
+4. it **respects the hard L3 constraints** it declared — no disallowed `unsafe`, no forbidden path,
+   allocation budget met. A constraint the family did not declare (`None`) is not a barrier; only an
+   explicit failure fails the task. Quality checks (clippy, fmt, and L4) are **not** part of pass.
+
+Two properties make this the right definition rather than a tuned cutoff:
+
+- **Weight-independent.** It never reads the composite weights, so re-tuning a category's
+  behavior/constraint split cannot move pass rates. A threshold `task_score ≥ τ` does not have this
+  property — REVIEW-6 measured a swept τ producing **23.3% type-I error** and moving effect sizes by a
+  median 7 points. Structural pass removes the free parameter entirely.
+- **It enforces the category thesis.** A clone-everything answer in `borrow-lifetimes` passes every
+  behaviour test but fails the allocation constraint, so it does **not** pass — exactly what the
+  constraint-dominant weighting intends, now as a hard fact rather than a weighted average.
+
+Implemented as `OracleVector::passed()` in `bench-core`. The continuous `capability_score` stays the
+published headline and the basis for every confidence interval; `passed` feeds only the binary metrics
+above. A task with no behaviour oracle cannot pass — nothing confirmed it correct.
+
 ## Variance sources
 
 Three, and they are not equal:
@@ -261,21 +293,75 @@ Greedy repeats are near-worthless for capability estimation — that budget belo
 
 Backend nondeterminism is real: llama.cpp greedy output can vary with batch size and backend. Any case where identical `(model, seed, sampling)` produced different output is recorded and published as a backend fact, not silently averaged away.
 
-## Confidence interval computation
+## Confidence intervals and tests (the estimation spec)
 
-**Cluster-bootstrap at the family level. Never resample instances independently.**
+**The published CI is always the cluster bootstrap. The design-effect formula and the ICC estimate are
+for sizing and diagnostics only — never for a published interval (Q29).** This one rule removes the
+worst failure mode: a badly-estimated (even negative) ICC cannot narrow a bootstrap CI, because the
+bootstrap never reads it.
+
+### The bootstrap unit: the coarsest cluster
+
+Resample at the **top** cluster level, carrying everything nested beneath it, then recompute:
 
 ```
 repeat 10_000 times:
-    resample task families with replacement
-    carry all seeds of each resampled family along
+    resample <top-level clusters> with replacement
+    carry all families and seeds of each along
     recompute the statistic
 report 2.5th and 97.5th percentiles
 ```
 
-Naive per-instance bootstrap understates the CI by roughly 40% at ICC = 0.3. That produces confident nonsense, which is worse than no number.
+The top level is **shapes** once shapes are labelled ("Clustering is two-level" above; needs the
+shape-count audit, **Q24**) — families cluster into a smaller number of shapes, and a family-level
+resample misses that correlation. **Until shapes are labelled the bootstrap resamples families, and
+every CI so produced is flagged as a lower bound on width** (it under-covers by the shape clustering it
+cannot see). Never resample instances (seeds) independently — that understates the CI by ~40% at
+ICC 0.3, which is confident nonsense. The same rule applies to category scores (resample the clusters
+within the category) and to paired comparisons (resample clusters, recompute the paired difference).
 
-The same clustering applies to category scores (resample families within category) and to paired comparisons (resample families, recompute the paired difference).
+`idiom-refactor` clusters **crossed, not nested** (a transform spans families), so no nested bootstrap
+is valid for it; it is **directional-only, never ranked**, until Q24 gives it an estimator.
+
+### Few clusters: wild cluster bootstrap
+
+The naive percentile cluster bootstrap **under-covers when clusters are few** — simulated 92% at a core
+category and 84% at `idiom-refactor`, against a nominal 95%. Use the **wild cluster bootstrap**
+(Cameron–Gelbach–Miller), which holds coverage down to ~12–15 clusters, and **validate coverage by
+simulation** before publishing. Any category below a cluster-count floor (fixed at the shape audit) is
+**directional-only, not ranked** — the honest home for `idiom-refactor` and any few-shape category.
+
+### ICC: estimated, clamped, diagnostic-only
+
+ICC is estimated by variance components (ANOVA / REML), **clamped to [0, 1]**, and the design effect is
+`max(1, 1 + (m−1)·ICĈ)` — you can never claim more precision than an independent sample from clustered
+data. Because per-category family counts are small, each category's ICC is **shrunk toward the pooled
+estimate** (empirical Bayes) rather than trusted raw. It is published per category as
+`icc_within_family` / `icc_within_shape` and used for *sizing*; it is not an input to any published CI.
+
+### The precomputation detector: sign test, pick-one collapse
+
+The fresh-probe seed is compared against the paired core to detect precomputation. A `deep` run has 4
+core seeds per family and 1 probe seed, so the family's core outcome (`passed`, above) must collapse to
+one bit to pair with the probe. **The collapse is pick-one: a single designated core seed (index 0).**
+It is the only rule that preserves the null — proven `E[b]−E[c] = E[P(B=1|p)] − E[p]`, with simulated
+honest-run false-accusation rates of 100% (`any`), 53.7% (`majority`), **4.2% (`pick-one`, ≈ nominal)**.
+The other three core seeds serve capability, not the detector; "wasting" them here is the price of a
+valid test.
+
+### Multiple comparisons: family-wise control
+
+The radar chart shows 11 category scores at once; uncorrected, its family-wise error is 94–99%.
+**Control the family-wise error rate, pre-registered (Q29.4):**
+
+- **Radar CIs are simultaneous** — each category interval is computed at level 1 − 0.05/11 ≈ 99.5%
+  (Bonferroni), so *joint* coverage across all 11 is 95%. The chart states that its bands are
+  simultaneous.
+- **Model-vs-model category comparisons use Holm** across the categories compared — uniformly more
+  powerful than plain Bonferroni while still controlling FWER.
+
+FDR (Benjamini–Hochberg) was considered and rejected: on a public leaderboard a controlled fraction of
+false "category X beats Y" claims is worse than wider bars.
 
 ## Measure the real ICC, then adapt
 
@@ -291,5 +377,6 @@ Adaptive allocation is a version-2 feature, but the schema must have a home for 
 - Every published score carries a CI. A score without one is not published.
 - Every published score states its suite tier and effective N.
 - Category comparisons within a model use the paired bootstrap, not overlapping-CI eyeballing.
-- Model comparisons use McNemar on the shared seed set, and state the discordant-pair count.
+- Model comparisons use McNemar on the shared seed set (the `passed` bit), and state the discordant-pair count.
+- Any figure showing many scores at once (the radar) uses **simultaneous** CIs; any multi-category test controls FWER (Bonferroni/Holm). The correction is pre-registered, never chosen post-hoc.
 - Any metric flagged unstable (see [05-hardware-and-calibration.md](05-hardware-and-calibration.md)) is displayed struck through, not omitted.
