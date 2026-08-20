@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod bit_manipulation;
+pub mod checked_eval;
 pub mod distance;
 pub mod dual_region;
 pub mod epoch;
@@ -180,6 +181,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "str-transform",
     "dual-region",
     "generic-select",
+    "checked-eval",
 ];
 
 /// Look up a family by id.
@@ -196,6 +198,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "str-transform" => Some(Box::new(string_processing::StringProcessingFamily)),
         "dual-region" => Some(Box::new(dual_region::DualRegionFamily)),
         "generic-select" => Some(Box::new(generic_select::GenericSelectFamily)),
+        "checked-eval" => Some(Box::new(checked_eval::CheckedEvalFamily)),
         _ => None,
     }
 }
@@ -300,6 +303,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("generic-select").unwrap().as_ref(), 4000),
             16
+        );
+        // checked-eval = 3 checked folds x 4 guard types (a second error-handling family).
+        assert_eq!(
+            spec_diversity(family("checked-eval").unwrap().as_ref(), 4000),
+            12
         );
     }
 }

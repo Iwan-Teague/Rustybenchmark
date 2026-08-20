@@ -8,6 +8,46 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Twelfth family: `checked-eval` — a *second* `error-handling` family
+
+Brings the third core category to two families. `error-handling` (#1) is parse-then-validate over
+`&[&str]` with plain arithmetic; `checked-eval` tests the sub-skill #1 doesn't — **checked arithmetic and
+overflow propagation**. The model implements `fn f(xs: &[i64]) -> Result<i64, MathError>`, folding with a
+seed-selected checked reduction and short-circuiting on the first error: a **guard** failure
+(`MathError::OutOfRange(x)`) or an **overflow** (`MathError::Overflow`). This is the "don't panic on
+overflow, propagate via `checked_*` + `.ok_or(…)?`" skill.
+
+Seed-selected on **fold** (Sum / Product / SumSquares, all `checked_*`) × **guard** (Positive / NonZero /
+AtMost(b) / InRange(lo,hi)) = **12 distinct skills**; guard bounds are per-skill constants excluded from
+`spec_signature`. The `MathError` enum is pinned in the skeleton (docs/04: error-handling pins the public
+error type). Correct-by-construction (ADR-0003): native `eval` and the emitted reference are mirrored
+(errors compared as tag strings, as in #1).
+
+**The differential earns its keep here.** It fuzzes values in ±3e9 — wide enough that `Product`/
+`SumSquares` overflow — so a model that reaches for plain `*` instead of `checked_mul` *panics* in the
+debug build, produces no test summary, and scores 0. The reference is `checked_*` throughout, so it never
+panics. `validate-family --seeds 8`, all gates green:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+view       min=0.201 median=0.397 near-twins 1/28
+reference  min=0.130 median=0.453 near-twins 2/28   capacity=10
+spec-diversity: 12 distinct skills
+```
+
+Baselines: `const-ok` (`Ok(0)`) is caught by the canonical `[2,3,4]` (valid under every guard → `Ok(v≠0)`);
+`no-guard` (folds correctly but omits the precondition) is caught by a constructed guard-failure example.
+A test pins both invariants across every (fold, guard) combo. reference-capacity **10** — healthier than
+the purely-pinned families because the checked-fold body varies more than a bare plumbing shape.
+
+`error-handling` now has **2 of 40**. Three of the four covered core categories (`borrow-lifetimes`,
+`traits-generics`, `error-handling`) sit at 2 families each; only `unsafe-core` (miri-gated) is still at 1,
+and `idiom-refactor` (compositional archetype) remains unstarted. Second clippy `enum_variant_names` catch
+of the session (the `Checked` prefix — exactly the pitfall just added to doc 17), renamed to Sum/Product/
+SumSquares. 157 workspace tests (+6); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Refreshed the authoring guide (doc 17) with the families and lessons
 
 The roadmap calls authoring ergonomics "the highest-leverage work in the project" (an hour spent here pays
