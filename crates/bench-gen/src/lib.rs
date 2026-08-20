@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod distance;
+pub mod epoch;
 pub mod error_handling;
 pub mod window_op;
 

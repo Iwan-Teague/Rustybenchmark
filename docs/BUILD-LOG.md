@@ -8,6 +8,47 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Distance-aware epoch sampler (Q30) — and it measured a hard capacity ceiling
+
+Built `bench_gen::epoch`, the Q30 second-order fix: a run must not *serve* two near-twins even when a
+family's average distance is healthy. `plan_epoch` draws candidate seeds in order and rejects any whose
+model-view is closer than the floor to an already-accepted sibling, so the seeds it serves are
+pairwise-distant by construction. It is deterministic in `(family, epoch, n, threshold)` — replay-safe —
+and measures distance on the exact `view_of` string the CI gate uses, so a plan that clears the floor
+here clears the gate. If a family cannot supply the requested count it returns `Exhausted` rather than
+serving a twin. `MIN_INSTANCE_DISTANCE = 0.25` is now a named constant both the sampler and
+`validate-family`'s near-twin gate read, so they cannot drift.
+
+**Running it turned the soft near-twin count into a hard ceiling — the finding.** The sampler's
+*distinct-at-floor capacity* (most pairwise-≥0.25 instances a family can seat) is far below what the
+median implies, because pairwise-mutual distance is a much stronger constraint than average distance:
+
+| family | median | near-twin pairs | **distinct-at-floor capacity** |
+|---|---|---|---|
+| window-op | 0.433 | 7/45 | **8** |
+| error-handling | 0.263 | 18/45 | **3** |
+
+`error-handling`'s capacity of **3** is below any usable per-epoch seed count: as designed it cannot
+outlast repeated epochs without repeating an instance, so Q30's "enlarge the variable surface" lever is
+effectively forced for it. `window-op`'s 8 is workable but tight. Both capacities are pinned as
+regression tests (`window_op_capacity_at_floor_is_8`, `error_handling_capacity_at_floor_is_3`) so a
+family change that moves them fails loudly rather than silently degrading anti-memorisation.
+
+`validate-family` now closes the loop in one output: it reports median/near-twins (detection) **and**
+the sampler's capacity (prevention). Live:
+
+```
+window-op:       near-twin pairs (<0.25)=7/45   · epoch sampler: capacity 8 … enlarge the variable surface (Q30)
+error-handling:  near-twin pairs (<0.25)=18/45  · epoch sampler: capacity 3 … enlarge the variable surface (Q30)
+```
+
+Docs updated: Q3/Q30 (capacity table + the "capacity is the real ceiling" reframing),
+[02-task-format.md](02-task-format.md) (distinct-at-floor capacity as the measure families are authored
+against), [04-categories.md](04-categories.md) (`error-handling` capacity 3 → must be enlarged before it
+ships). 7 new tests; workspace 59 tests; clippy/fmt clean.
+
+---
+
 ## 2026-08-20 · Folded the Q3 variance finding into the design docs
 
 The second-family measurement (below) produced a design-level conclusion that lived only in this build

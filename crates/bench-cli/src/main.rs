@@ -380,12 +380,7 @@ fn validate_family(
     for seed in 0..seeds {
         let gt = g.generate(seed);
         let task = task_from_generated(&gt);
-        let skeleton = gt
-            .files
-            .get(Path::new(&gt.answer_path))
-            .cloned()
-            .unwrap_or_default();
-        views.push(format!("{}\n{}", gt.prompt, skeleton));
+        views.push(bench_gen::epoch::view_of(&gt));
 
         let gt2 = g.generate(seed);
         let deterministic =
@@ -442,6 +437,7 @@ fn validate_family(
     }
 
     if views.len() >= 2 {
+        let floor = bench_gen::epoch::MIN_INSTANCE_DISTANCE;
         let mut min = f64::INFINITY;
         let mut all_d: Vec<f64> = Vec::new();
         let mut near_twins = 0u32;
@@ -454,7 +450,7 @@ fn validate_family(
                 );
                 min = min.min(d);
                 all_d.push(d);
-                if d < 0.25 {
+                if d < floor {
                     near_twins += 1;
                 }
             }
@@ -462,14 +458,29 @@ fn validate_family(
         all_d.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let median = all_d[all_d.len() / 2];
         println!(
-            "  anti-twin (prompt+skeleton): min={min:.3} median={median:.3} near-twin pairs (<0.25)={near_twins}/{}",
+            "  anti-twin (prompt+skeleton): min={min:.3} median={median:.3} near-twin pairs (<{floor})={near_twins}/{}",
             all_d.len()
         );
-        if near_twins > 0 {
-            println!(
-                "  note: {near_twins} near-twin pair(s) — the family's distinct-task space is finite; \
-                 an epoch's seeds should be chosen to avoid within-family collisions."
-            );
+
+        // Detection is the average distance above; prevention is the distance-aware
+        // epoch sampler (Q30). Report the family's *distinct-at-floor capacity*: how
+        // many pairwise-clean instances it can actually serve. A capacity below the
+        // per-epoch seed count means the family needs a larger variable surface, not
+        // just a passing median.
+        let want = views.len();
+        let budget = ((want as u32) * 100).clamp(500, 4000);
+        match bench_gen::epoch::plan_epoch_from(g.as_ref(), 0u64.., want, floor, budget) {
+            Ok(plan) => println!(
+                "  epoch sampler: served {} pairwise-distant seed(s) (rejected {} collision(s), min={:.3})",
+                plan.seeds.len(),
+                plan.rejected(),
+                plan.min_pairwise,
+            ),
+            Err(e) => println!(
+                "  epoch sampler: capacity {} pairwise-distant instance(s) at floor {floor} \
+                 (asked {want}, {} candidates examined) — enlarge the variable surface (Q30)",
+                e.accepted, e.attempts,
+            ),
         }
     }
 

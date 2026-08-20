@@ -173,9 +173,12 @@ Rust error handling — **is not gradeable by this oracle and is out of scope**.
 Pinning the enum has a measured side effect on **variance**. Because the given enum and the fixed
 plumbing shape are most of what the model sees, `error-handling` instances sit close together — median
 inter-instance distance **0.263** against `borrow-lifetimes`' **0.433**, near the near-twin floor
-(measured on the two Phase-3 exemplar families, [BUILD-LOG](BUILD-LOG.md)). The category is
-correct-by-construction but naturally low-variance; how the corpus plan compensates — a per-category
-distance floor or a larger seed-varied surface — is [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
+(measured on the two Phase-3 exemplar families, [BUILD-LOG](BUILD-LOG.md)). Worse under the sharper
+measure: its **distinct-at-floor capacity is only 3** — it can serve just three tasks that are all
+pairwise `≥ 0.25` apart, against `borrow-lifetimes`' 8. Three is below any usable per-epoch seed count,
+so **this family as designed cannot outlast repeated epochs** and must gain a larger seed-varied surface
+(more combine ops / validation rules) before it ships. The category is correct-by-construction but the
+current parameterisation is too narrow; see [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
 
 ## Per-category oracle weights
 

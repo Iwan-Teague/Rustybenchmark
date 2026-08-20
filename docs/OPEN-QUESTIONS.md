@@ -81,7 +81,9 @@ is small. A family whose fixed scaffolding is large relative to its variable sur
 **Consequence for the 272-family plan:** variance must be designed for per family, not assumed from
 seeding. The `validate-family` gate already detects the problem in CI; which prevention lever the
 corpus adopts (a per-category floor vs. a mandate to enlarge the variable surface) is the remaining
-open part, tracked as **Q30**.
+open part, tracked as **Q30**. The operative measure there turned out to be not the near-twin *count*
+but the *distinct-at-floor capacity* (window-op 8, error-handling 3) — pairwise-mutual distance is a
+far stronger constraint than the median, and it is the real ceiling.
 
 ---
 
@@ -460,6 +462,25 @@ producing near-twins inside one run regardless of the family's average distance.
 sampler — reject a candidate seed too close to an already-chosen sibling — fixes that independently of
 the floor decision.
 
-Decide before authoring beyond the two exemplar families. The gate already *detects* the problem in CI
-(`validate-family` reports min/median distance and near-twin count); this question is which prevention
-strategy the corpus adopts.
+**That sampler is now built** (`bench_gen::epoch`, [BUILD-LOG](BUILD-LOG.md) 2026-08-20), and running
+it turned the soft near-twin-pair count into a hard ceiling. Its **distinct-at-floor capacity** — the
+most pairwise-≥0.25 instances a family can actually serve — is:
+
+| family | median distance | near-twin pairs | **distinct-at-floor capacity** |
+|---|---|---|---|
+| `borrow-lifetimes` (window-op) | 0.433 | 7/45 | **8** |
+| `error-handling` | 0.263 | 18/45 | **3** |
+
+Pairwise-mutual distance is a far stronger constraint than the median, so capacity is *much* lower than
+either headline number implies: a family whose median looks healthy can seat only a handful of
+genuinely distinct tasks. This reframes the decision above — capacity is a hard ceiling on how many
+memorisation-resistant epochs a family can sustain before it must repeat an instance, so **for
+`error-handling` (capacity 3) lever 2 is effectively forced**: no per-category floor rescues a family
+that cannot supply enough distinct instances to outlast repeated epochs. `window-op`'s 8 is workable
+but still tight. Every family authored in Phase 3 must report a capacity comfortably above the intended
+per-epoch seed count, or be enlarged until it does.
+
+Decide before authoring beyond the two exemplar families. The gate now both *detects* the problem in CI
+and *prevents* it at serve time (`validate-family` reports median/near-twins **and** the epoch sampler's
+capacity; the sampler refuses to serve a twin, returning `Exhausted` instead); this question is which of
+the two prevention strategies the corpus standardises on.

@@ -219,6 +219,15 @@ not the gate. Second, whether the fix is a per-category floor or a mandate to en
 surface is open ([Q30](OPEN-QUESTIONS.md)); until it is decided, a scaffolding-heavy family must be
 inspected on its near-twin count, not waved through on its median.
 
+The sharper measure is **distinct-at-floor capacity**: the most instances a family can serve that are
+all pairwise `≥ min_instance_distance`. The `bench_gen::epoch` sampler computes it by greedily rejecting
+any candidate seed too close to an already-accepted sibling, and it is much smaller than the median
+suggests — `window-op` seats **8**, `error-handling` only **3**. That capacity is the real ceiling on
+how many memorisation-resistant epochs a family can sustain before it must repeat an instance, so it,
+not the median, is the number every Phase-3 family is authored against. The sampler also *serves* the
+epoch: it never emits a near-twin, returning `Exhausted` if a family cannot supply the requested count —
+which is the point at which that family must be enlarged.
+
 ## Generator validation (CI, ≥1000 seeds per family)
 
 Every one of these is a hard gate. A family that fails any of them does not ship.
