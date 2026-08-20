@@ -22,6 +22,38 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+/// Resource limits applied to a contained command. The wall-clock timeout is
+/// the load-bearing one — it stops infinite loops, hangs, and fork bombs that
+/// never terminate. The rest are backstops.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Harness-owned wall-clock deadline. On expiry the whole process group is
+    /// killed (docs/08: timeouts are harness-owned, never submitter-set).
+    pub wall: Duration,
+    /// `RLIMIT_CPU` seconds — a *far* backstop, only for the case where the
+    /// harness's own wait loop fails. It must stay well above the wall clock:
+    /// a multi-threaded test binary accumulates CPU time N× faster than wall
+    /// time, so tying CPU to the wall makes the CPU limit pre-empt the wall and
+    /// mis-record the kill. The wall clock is always the primary control.
+    pub cpu: Duration,
+    /// `RLIMIT_AS` bytes — address-space cap. `None` by default: macOS enforces
+    /// `RLIMIT_AS` unreliably, so it is opt-in until verified per platform.
+    pub address_space: Option<u64>,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        // Generous enough that a real frozen-task build/test never trips it;
+        // tight enough to catch a runaway. Suites tune these.
+        Limits {
+            wall: Duration::from_secs(120),
+            cpu: Duration::from_secs(3600),
+            address_space: None,
+        }
+    }
+}
 
 /// What containment the current platform can actually apply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,11 +82,13 @@ pub struct Policy {
     /// Cargo's home, allowlisted for writes so `--offline` builds can take the
     /// `.package-cache` lock and reuse the registry.
     pub cargo_home: PathBuf,
+    /// Resource limits applied to every command run under this policy.
+    pub limits: Limits,
 }
 
 impl Policy {
-    /// Build a policy for `workspace`. Paths are canonicalised because seatbelt
-    /// matches on the real path, not symlinks.
+    /// Build a policy for `workspace` with default limits. Paths are
+    /// canonicalised because seatbelt matches on the real path, not symlinks.
     pub fn for_workspace(workspace: &Path) -> io::Result<Policy> {
         let workspace = workspace.canonicalize()?;
         let cargo_home = std::env::var_os("CARGO_HOME")
@@ -65,7 +99,14 @@ impl Policy {
         Ok(Policy {
             workspace,
             cargo_home,
+            limits: Limits::default(),
         })
+    }
+
+    /// Set the resource limits (builder style).
+    pub fn with_limits(mut self, limits: Limits) -> Policy {
+        self.limits = limits;
+        self
     }
 }
 
@@ -74,6 +115,8 @@ pub struct Outcome {
     pub status: std::process::ExitStatus,
     pub stdout: String,
     pub stderr: String,
+    /// The wall-clock deadline fired and the process group was killed.
+    pub timed_out: bool,
     /// What containment was actually applied to this run.
     pub containment: Containment,
 }
@@ -123,13 +166,7 @@ fn run_seatbelt(
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let out = cmd.output()?;
-    Ok(Outcome {
-        status: out.status,
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        containment: Containment::Seatbelt,
-    })
+    finish(cmd, &policy.limits, Containment::Seatbelt)
 }
 
 /// The seatbelt profile (SBPL): permit by default, then subtract the two things
@@ -168,13 +205,105 @@ fn run_unconfined(
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let out = cmd.output()?;
-    Ok(Outcome {
-        status: out.status,
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        containment: Containment::Unsupported,
-    })
+    finish(cmd, &policy.limits, Containment::Unsupported)
+}
+
+/// Run `cmd` to completion under `limits`: apply rlimits and a private process
+/// group in the child, capture stdio to temp files (so a full pipe cannot
+/// deadlock the manual wait), and enforce the wall-clock deadline by killing the
+/// whole process group.
+fn finish(mut cmd: Command, limits: &Limits, containment: Containment) -> io::Result<Outcome> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        // The child leads its own process group, so the deadline can kill the
+        // entire tree (cargo → rustc → the test binary), not just the direct
+        // child.
+        cmd.process_group(0);
+
+        // rlimits are set post-fork, pre-exec, and inherit to every descendant.
+        let cpu = limits.cpu.as_secs();
+        let addr = limits.address_space;
+        // SAFETY: setrlimit is async-signal-safe; the closure touches no heap
+        // and no shared state, which is the contract for pre_exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                let cpu_lim = libc::rlimit {
+                    rlim_cur: cpu as libc::rlim_t,
+                    rlim_max: cpu as libc::rlim_t,
+                };
+                libc::setrlimit(libc::RLIMIT_CPU, &cpu_lim);
+                if let Some(a) = addr {
+                    let as_lim = libc::rlimit {
+                        rlim_cur: a as libc::rlim_t,
+                        rlim_max: a as libc::rlim_t,
+                    };
+                    libc::setrlimit(libc::RLIMIT_AS, &as_lim);
+                }
+                Ok(())
+            });
+        }
+
+        let out_path = temp_log("out");
+        let err_path = temp_log("err");
+        cmd.stdout(std::fs::File::create(&out_path)?);
+        cmd.stderr(std::fs::File::create(&err_path)?);
+
+        let mut child = cmd.spawn()?;
+        let pid = child.id() as i32;
+        let deadline = Instant::now() + limits.wall;
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(st) = child.try_wait()? {
+                break st;
+            }
+            if Instant::now() >= deadline {
+                timed_out = true;
+                // Negative pid = the whole process group.
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
+                }
+                break child.wait()?;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+
+        let stdout = std::fs::read_to_string(&out_path).unwrap_or_default();
+        let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
+        let _ = std::fs::remove_file(&out_path);
+        let _ = std::fs::remove_file(&err_path);
+        Ok(Outcome {
+            status,
+            stdout,
+            stderr,
+            timed_out,
+            containment,
+        })
+    }
+
+    #[cfg(not(unix))]
+    {
+        // No process-group kill / rlimits without a Unix; timeout enforcement
+        // for Windows is future work.
+        let _ = limits;
+        let out = cmd.output()?;
+        Ok(Outcome {
+            status: out.status,
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            timed_out: false,
+            containment,
+        })
+    }
+}
+
+#[cfg(unix)]
+fn temp_log(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("rb-sbx-{}-{}-{}.log", std::process::id(), tag, n))
 }
 
 #[cfg(test)]
@@ -191,9 +320,10 @@ mod tests {
         }
     }
 
-    // The escape tests: they prove the sandbox actually contains. macOS only,
-    // because that is the only platform with an implementation to test.
-    #[cfg(target_os = "macos")]
+    // The escape tests: they prove the sandbox actually contains. Network and
+    // filesystem confinement are macOS-only for now; the wall-clock timeout is
+    // Unix-wide.
+    #[cfg(unix)]
     fn tmp_policy() -> Policy {
         let dir = std::env::temp_dir().join(format!("rb-sbx-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -242,6 +372,39 @@ mod tests {
             "sandboxed write to $HOME should fail, but it succeeded: {}",
             out.stderr
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wall_timeout_kills_runaway() {
+        let mut policy = tmp_policy();
+        policy.limits.wall = Duration::from_secs(2);
+        let start = Instant::now();
+        // A busy loop that never returns. The wall clock must kill it.
+        let out = run(
+            &policy,
+            "python3",
+            &["-c", "\nwhile True:\n    pass\n"],
+            &[],
+        )
+        .unwrap();
+        assert!(out.timed_out, "runaway should have timed out");
+        assert!(!out.success(), "a killed process is not a success");
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "should be killed near the 2s deadline, took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normal_command_does_not_time_out() {
+        let policy = tmp_policy();
+        let out = run(&policy, "python3", &["-c", "print('ok')"], &[]).unwrap();
+        assert!(!out.timed_out);
+        assert!(out.success());
+        assert!(out.stdout.contains("ok"));
     }
 
     #[cfg(target_os = "macos")]

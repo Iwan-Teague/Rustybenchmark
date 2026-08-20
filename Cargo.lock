@@ -124,6 +124,9 @@ dependencies = [
 [[package]]
 name = "bench-sandbox"
 version = "0.0.1"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "bitflags"

@@ -235,6 +235,10 @@ pub struct OracleVector {
     // Composite in [0, 1]; 0.0 unless both gates pass.
     pub score: f32,
     pub failure_class: FailureClass,
+    /// Non-scoring event markers, e.g. `"timeout:test"`, `"network_attempt"`.
+    /// docs/12-schemas.md and REVIEW-6 R6-S8: a timeout is a *flag*, not a
+    /// failure class.
+    pub flags: Vec<String>,
 }
 
 impl OracleVector {
@@ -249,6 +253,7 @@ impl OracleVector {
             constraint: ConstraintScore::default(),
             score: 0.0,
             failure_class: FailureClass::Other,
+            flags: Vec::new(),
         }
     }
 }
@@ -382,6 +387,7 @@ mod tests {
             constraint: constraint_score,
             score: 0.0,
             failure_class: FailureClass::None,
+            flags: Vec::new(),
         }
     }
 

@@ -40,6 +40,8 @@ pub struct GradeSpec<'a> {
     /// The `cargo test --test <name>` target carrying the L3 allocation
     /// instrumentation. `None` skips the constraint layer.
     pub alloc_test: Option<&'a str>,
+    /// Resource limits (harness-owned wall clock, rlimits) for every cargo call.
+    pub limits: bench_sandbox::Limits,
 }
 
 /// Grade one model response for one instance.
@@ -76,10 +78,14 @@ pub fn grade(
     // Containment for every model-code execution below. Built once; the model
     // has already produced its response (unsandboxed HTTP), and nothing it
     // wrote runs until now.
-    let policy = bench_sandbox::Policy::for_workspace(workspace)?;
+    let policy = bench_sandbox::Policy::for_workspace(workspace)?.with_limits(spec.limits);
+    let mut flags: Vec<String> = Vec::new();
 
     // ---- L1: compile ----
     let build = run_cargo(&policy, &["build", "--offline", "--message-format=json"])?;
+    if build.timed_out {
+        flags.push("timeout:build".into());
+    }
     let (error_codes, warn_count) = parse_diagnostics(&build.stdout);
     let compile_ok = build.success;
 
@@ -94,6 +100,7 @@ pub fn grade(
             constraint: ConstraintScore::default(),
             score: 0.0,
             failure_class,
+            flags: flags.clone(),
         };
         v.score = composite_score(&v, spec.weights);
         return Ok(v);
@@ -107,6 +114,9 @@ pub fn grade(
     }
     targs.extend_from_slice(&["--offline", "--quiet"]);
     let test = run_cargo(&policy, &targs)?;
+    if test.timed_out {
+        flags.push("timeout:test".into());
+    }
     let unit = parse_test_summary(&test.stdout).or_else(|| parse_test_summary(&test.stderr));
     let unit_score = unit.map(|(passed, total)| {
         if total == 0 {
@@ -126,6 +136,9 @@ pub fn grade(
     // ---- L2 differential: candidate vs hidden reference over generated inputs ----
     if let Some(name) = spec.differential_test {
         let out = run_cargo(&policy, &["test", "--test", name, "--offline", "--quiet"])?;
+        if out.timed_out {
+            flags.push("timeout:differential".into());
+        }
         behavior.differential =
             match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
                 Some((passed, total)) if total > 0 => Some(passed as f32 / total as f32),
@@ -138,6 +151,9 @@ pub fn grade(
     let mut constraint = ConstraintScore::default();
     if let Some(name) = spec.alloc_test {
         let out = run_cargo(&policy, &["test", "--test", name, "--offline", "--quiet"])?;
+        if out.timed_out {
+            flags.push("timeout:alloc".into());
+        }
         match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
             Some((passed, total)) if total > 0 => {
                 let ok = passed == total;
@@ -176,6 +192,7 @@ pub fn grade(
         constraint,
         score: 0.0,
         failure_class,
+        flags,
     };
     v.score = composite_score(&v, spec.weights);
     Ok(v)
@@ -234,6 +251,7 @@ struct CargoRun {
     success: bool,
     stdout: String,
     stderr: String,
+    timed_out: bool,
 }
 
 fn run_cargo(policy: &bench_sandbox::Policy, args: &[&str]) -> std::io::Result<CargoRun> {
@@ -245,6 +263,7 @@ fn run_cargo(policy: &bench_sandbox::Policy, args: &[&str]) -> std::io::Result<C
         success: out.success(),
         stdout: out.stdout,
         stderr: out.stderr,
+        timed_out: out.timed_out,
     })
 }
 

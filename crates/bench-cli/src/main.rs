@@ -42,6 +42,9 @@ enum Command {
         /// Scratch root for grading workspaces.
         #[arg(long, default_value = "runs/ws")]
         scratch: PathBuf,
+        /// Harness-owned wall-clock timeout per cargo stage, in seconds.
+        #[arg(long, default_value_t = 120)]
+        wall_timeout_secs: u64,
     },
 }
 
@@ -125,7 +128,15 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             model_name,
             out,
             scratch,
-        } => run(&task, &model, &model_name, &out, &scratch),
+            wall_timeout_secs,
+        } => run(
+            &task,
+            &model,
+            &model_name,
+            &out,
+            &scratch,
+            wall_timeout_secs,
+        ),
     }
 }
 
@@ -135,6 +146,7 @@ fn run(
     model_name: &str,
     out: &Path,
     scratch_root: &Path,
+    wall_timeout_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // --- load the frozen task ---
     let manifest_text = std::fs::read_to_string(task_dir.join("task.toml"))
@@ -194,12 +206,20 @@ fn run(
         })
         .unwrap_or_default();
     let ocfg = manifest.oracle.unwrap_or_default();
+    let limits = bench_sandbox::Limits {
+        wall: std::time::Duration::from_secs(wall_timeout_secs),
+        // Far CPU backstop: 30x the wall so the wall clock is always the primary
+        // limit even for a multi-threaded test binary (see BUILD-LOG).
+        cpu: std::time::Duration::from_secs(wall_timeout_secs.saturating_mul(30)),
+        address_space: None,
+    };
     let spec = bench_oracle::GradeSpec {
         answer_path: Path::new(&manifest.answer_path),
         weights: &weights,
         behavior_test: ocfg.behavior_test.as_deref(),
         differential_test: ocfg.differential_test.as_deref(),
         alloc_test: ocfg.alloc_test.as_deref(),
+        limits,
     };
 
     let containment = match bench_sandbox::available() {
@@ -253,6 +273,9 @@ fn run(
     );
     if !vector.error_codes.is_empty() {
         println!("  rustc: {}", vector.error_codes.join(", "));
+    }
+    if !vector.flags.is_empty() {
+        println!("  flags: {}", vector.flags.join(", "));
     }
     println!("  journal → {}", out.display());
     Ok(())

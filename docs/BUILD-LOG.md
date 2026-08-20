@@ -8,6 +8,47 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P1 — bench-sandbox: wall-clock timeout + rlimits
+
+**What.** Finishes the sandbox's resource controls. Model code that spins,
+hangs, or fork-bombs is now stopped by a **harness-owned wall-clock timeout**,
+with `RLIMIT_CPU` as a far backstop. Every cargo stage runs under it.
+
+**Mechanism (Unix).** The child leads its own process group (`process_group(0)`),
+so on the deadline the whole tree — cargo → rustc → the test binary — is killed
+with `kill(-pgid, SIGKILL)`, not just the direct child. `setrlimit` runs in a
+`pre_exec` hook and inherits to every descendant. Stdio is captured to temp files
+so a full pipe can't deadlock the manual wait loop. `--wall-timeout-secs` makes
+the deadline harness-owned and suite-tunable (docs/08: never submitter-set).
+
+**Demonstrated.** An `infiniteloop` answer (`loop {}`) compiles, then every test
+stage hangs; at `--wall-timeout-secs 5` all three are killed and recorded:
+
+```
+score 0.000  failure=Logic
+flags: timeout:test, timeout:differential, timeout:alloc
+```
+
+The journal carries the `flags` (docs/12, R6-S8: a timeout is a *flag*, not a
+failure class). Normal cases are unaffected — pass 1.000, subtlebug 0.844.
+
+**A real bug, found by running it — not by review.** The first cut tied
+`RLIMIT_CPU` to the wall value. The behaviour stage runs **five tests on five
+threads**, so it accumulated CPU 5× faster than wall time and was killed by
+`SIGXCPU` at ~1s — *before* the wall clock — so that kill was **not** recorded as
+a timeout (its flag was silently missing while differential/alloc, single-test,
+raced to the deadline and were flagged). The fix decouples the CPU limit to a
+generous backstop (`wall × 30`) so the **wall clock is always the primary
+control** for any realistic thread count. A single flat `RLIMIT_CPU == wall`
+would have shipped a sandbox that under-reports timeouts on exactly the
+multi-test stages that matter. Escape tests (`wall_timeout_kills_runaway`,
+`normal_command_does_not_time_out`) now cover it in CI.
+
+**Still deferred:** `RLIMIT_AS` is opt-in (macOS enforces it unreliably); Linux
+netns and Windows job objects remain the cross-platform gap.
+
+---
+
 ## 2026-08-19 · P1 (partial) — bench-sandbox: containing model-authored code
 
 **What.** Until now the oracle ran arbitrary model-authored Rust under plain
