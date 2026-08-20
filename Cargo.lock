@@ -81,6 +81,7 @@ name = "bench-cli"
 version = "0.0.1"
 dependencies = [
  "bench-core",
+ "bench-gen",
  "bench-model",
  "bench-oracle",
  "bench-sandbox",
@@ -98,6 +99,14 @@ dependencies = [
  "blake3",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bench-gen"
+version = "0.0.1"
+dependencies = [
+ "bench-core",
+ "blake3",
 ]
 
 [[package]]

@@ -1,9 +1,8 @@
-//! `rustybench` — the CLI. P0 spine: a single `run` subcommand that loads a
-//! frozen task, sends its prompt to an OpenAI-compatible model, grades the
-//! response with the real toolchain, and appends one line to a JSONL journal.
-//!
-//! This proves the loop end to end (docs/14-roadmap.md P0 exit criterion).
-//! Generation, seeding, the sandbox, resume, and submission are later phases.
+//! `rustybench` — the CLI. Grades a task (frozen file or seeded generator)
+//! against an OpenAI-compatible model, under the sandbox, and appends a scored
+//! JSONL line. Also `validate-family`, which runs a family's own construction
+//! gates: the reference must score 1.0, the skeleton must fail, generation must
+//! be deterministic (ADR-0003).
 
 use bench_core::{FailureClass, Instance, OracleVector, OracleWeights, Seed, TaskId, WorkUnit};
 use bench_model::{ModelClient, SamplingConfig};
@@ -16,7 +15,7 @@ use std::path::{Path, PathBuf};
 #[command(
     name = "rustybench",
     version,
-    about = "Rust coding benchmark for local LLMs (P0 spine)"
+    about = "Rust coding benchmark for local LLMs"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -25,31 +24,108 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run one frozen task against a model and append a graded journal line.
+    /// Run a task against a model and append a graded journal line.
     Run {
-        /// Path to a frozen task directory (contains task.toml).
+        /// A frozen task directory (contains task.toml). Mutually exclusive with --family.
         #[arg(long)]
-        task: PathBuf,
+        task: Option<PathBuf>,
+        /// A generator family id (e.g. `window-op`), used with --seed.
+        #[arg(long)]
+        family: Option<String>,
+        /// The seed for --family.
+        #[arg(long)]
+        seed: Option<u64>,
         /// OpenAI-compatible base URL, e.g. http://localhost:8080
         #[arg(long)]
         model: String,
-        /// Model name to send in the request body.
         #[arg(long, default_value = "local")]
         model_name: String,
-        /// Journal file to append to.
         #[arg(long, default_value = "runs/journal.jsonl")]
         out: PathBuf,
-        /// Scratch root for grading workspaces.
         #[arg(long, default_value = "runs/ws")]
         scratch: PathBuf,
-        /// Harness-owned wall-clock timeout per cargo stage, in seconds.
         #[arg(long, default_value_t = 120)]
         wall_timeout_secs: u64,
     },
+    /// Run a family's construction gates over a range of seeds (no model).
+    ValidateFamily {
+        #[arg(long)]
+        family: String,
+        /// Number of seeds to check, starting from 0.
+        #[arg(long, default_value_t = 8)]
+        seeds: u64,
+        #[arg(long, default_value = "runs/validate")]
+        scratch: PathBuf,
+    },
 }
 
-/// The parsed task.toml. A subset of docs/02-task-format.md sufficient for the
-/// spine's frozen tasks.
+/// Everything needed to grade one task, from either source.
+struct Task {
+    id: String,
+    category: String,
+    system_prompt: String,
+    prompt: String,
+    instance: Instance,
+    answer_path: String,
+    weights: OracleWeights,
+    behavior_test: Option<String>,
+    differential_test: Option<String>,
+    alloc_test: Option<String>,
+    max_unsafe: Option<u32>,
+    forbidden_paths: Vec<String>,
+}
+
+const GENERIC_SYSTEM_PROMPT: &str = "You are an expert Rust programmer. Respond with a SINGLE ```rust code block containing the complete contents of src/lib.rs. No prose, no explanation, no other text.";
+
+fn main() {
+    if let Err(e) = real_main() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn real_main() -> Result<(), Box<dyn std::error::Error>> {
+    match Cli::parse().command {
+        Command::Run {
+            task,
+            family,
+            seed,
+            model,
+            model_name,
+            out,
+            scratch,
+            wall_timeout_secs,
+        } => {
+            let t = load_task(task.as_deref(), family.as_deref(), seed)?;
+            run(t, &model, &model_name, &out, &scratch, wall_timeout_secs)
+        }
+        Command::ValidateFamily {
+            family,
+            seeds,
+            scratch,
+        } => validate_family(&family, seeds, &scratch),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task loading
+// ---------------------------------------------------------------------------
+
+fn load_task(
+    task_dir: Option<&Path>,
+    family: Option<&str>,
+    seed: Option<u64>,
+) -> Result<Task, Box<dyn std::error::Error>> {
+    match (task_dir, family) {
+        (Some(dir), None) => load_frozen(dir),
+        (None, Some(fam)) => {
+            let seed = seed.ok_or("--family requires --seed")?;
+            load_generated(fam, seed)
+        }
+        _ => Err("provide exactly one of --task or --family".into()),
+    }
+}
+
 #[derive(Deserialize)]
 struct TaskManifest {
     id: String,
@@ -65,21 +141,18 @@ struct TaskManifest {
     #[serde(default)]
     constraint: Option<ConstraintCfg>,
 }
-
 #[derive(Deserialize)]
 struct Weights {
     behavior: f32,
     constraint: f32,
     quality: f32,
 }
-
 #[derive(Deserialize, Default)]
 struct OracleCfg {
     behavior_test: Option<String>,
     differential_test: Option<String>,
     alloc_test: Option<String>,
 }
-
 #[derive(Deserialize, Default)]
 struct ConstraintCfg {
     max_unsafe: Option<u32>,
@@ -87,153 +160,115 @@ struct ConstraintCfg {
     forbidden_paths: Vec<String>,
 }
 
-/// One journal line — a subset of docs/12-schemas.md journal.jsonl.
-#[derive(Serialize)]
-struct JournalLine {
-    schema: u32,
-    unit_id: String,
-    task_id: String,
-    category: String,
-    seed: u64,
-    index: u32,
-    model: ModelInfo,
-    /// What containment grading ran under: "seatbelt" (macOS) or "unsupported".
-    /// Integrity-relevant — a leaderboard must know whether model code was
-    /// contained (docs/10-integrity.md).
-    sandbox: String,
-    oracle: OracleVector,
-    cost: Cost,
-    failure_class: FailureClass,
-}
-
-#[derive(Serialize)]
-struct ModelInfo {
-    name: String,
-    base_url: String,
-    finish_reason: String,
-}
-
-#[derive(Serialize)]
-struct Cost {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    gen_ms: u64,
-    grade_ms: u64,
-}
-
-fn main() {
-    if let Err(e) = real_main() {
-        eprintln!("error: {e}");
-        std::process::exit(1);
-    }
-}
-
-fn real_main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    match cli.command {
-        Command::Run {
-            task,
-            model,
-            model_name,
-            out,
-            scratch,
-            wall_timeout_secs,
-        } => run(
-            &task,
-            &model,
-            &model_name,
-            &out,
-            &scratch,
-            wall_timeout_secs,
-        ),
-    }
-}
-
-fn run(
-    task_dir: &Path,
-    base_url: &str,
-    model_name: &str,
-    out: &Path,
-    scratch_root: &Path,
-    wall_timeout_secs: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // --- load the frozen task ---
+fn load_frozen(task_dir: &Path) -> Result<Task, Box<dyn std::error::Error>> {
     let manifest_text = std::fs::read_to_string(task_dir.join("task.toml"))
         .map_err(|e| format!("reading task.toml in {}: {e}", task_dir.display()))?;
-    let manifest: TaskManifest = toml::from_str(&manifest_text)?;
-
+    let m: TaskManifest = toml::from_str(&manifest_text)?;
     let files = read_tree(&task_dir.join("template"))?;
     let hidden = read_tree(&task_dir.join("oracle"))?;
     let prompt = std::fs::read_to_string(task_dir.join("prompt.md"))
         .map_err(|e| format!("reading prompt.md: {e}"))?;
-
-    let instance = Instance {
-        prompt: prompt.clone(),
-        files,
-        hidden,
-        canary: format!("rb-frozen-{}", manifest.id),
-    };
-
-    // Frozen tasks have no generation; the work unit is (task, seed 0).
-    let unit = WorkUnit {
-        task_id: TaskId(manifest.id.clone()),
-        seed: Seed(0),
-        index: 0,
-    };
-
-    // --- the model turn (harness process, not sandboxed) ---
-    println!(
-        "→ {} against {base_url} ({model_name}) [sandbox: {}]",
-        manifest.id,
-        match bench_sandbox::available() {
-            bench_sandbox::Containment::Seatbelt => "seatbelt",
-            _ => "none",
-        }
-    );
-    let client = ModelClient::new(base_url, model_name);
-    let completion =
-        client.complete(&manifest.system_prompt, &prompt, &SamplingConfig::default())?;
-    println!(
-        "  ← {} completion tokens, finish={}, {} ms",
-        completion.completion_tokens, completion.finish_reason, completion.elapsed_ms
-    );
-
-    // --- grade ---
-    let ws = scratch_root.join(unit.unit_id().0.replace(':', "_"));
-    if ws.exists() {
-        std::fs::remove_dir_all(&ws)?;
-    }
-    std::fs::create_dir_all(&ws)?;
-
-    let weights = manifest
+    let ocfg = m.oracle.unwrap_or_default();
+    let ccfg = m.constraint.unwrap_or_default();
+    let weights = m
         .weights
-        .as_ref()
         .map(|w| OracleWeights {
             behavior: w.behavior,
             constraint: w.constraint,
             quality: w.quality,
         })
         .unwrap_or_default();
-    let ocfg = manifest.oracle.unwrap_or_default();
-    let ccfg = manifest.constraint.unwrap_or_default();
+    let canary = format!("rb-frozen-{}", m.id);
+    Ok(Task {
+        id: m.id.clone(),
+        category: m.category,
+        system_prompt: m.system_prompt,
+        prompt: prompt.clone(),
+        instance: Instance {
+            prompt,
+            files,
+            hidden,
+            canary,
+        },
+        answer_path: m.answer_path,
+        weights,
+        behavior_test: ocfg.behavior_test,
+        differential_test: ocfg.differential_test,
+        alloc_test: ocfg.alloc_test,
+        max_unsafe: ccfg.max_unsafe,
+        forbidden_paths: ccfg.forbidden_paths,
+    })
+}
+
+fn load_generated(fam: &str, seed: u64) -> Result<Task, Box<dyn std::error::Error>> {
+    let g = bench_gen::family(fam).ok_or_else(|| format!("unknown family `{fam}`"))?;
+    Ok(task_from_generated(&g.generate(seed)))
+}
+
+fn task_from_generated(gt: &bench_gen::GeneratedTask) -> Task {
+    Task {
+        id: gt.id.clone(),
+        category: gt.category.clone(),
+        system_prompt: GENERIC_SYSTEM_PROMPT.to_string(),
+        prompt: gt.prompt.clone(),
+        instance: gt.instance(),
+        answer_path: gt.answer_path.clone(),
+        weights: OracleWeights {
+            behavior: gt.weights.0,
+            constraint: gt.weights.1,
+            quality: gt.weights.2,
+        },
+        behavior_test: Some(gt.behavior_test.clone()),
+        differential_test: Some(gt.differential_test.clone()),
+        alloc_test: Some(gt.alloc_test.clone()),
+        max_unsafe: Some(gt.max_unsafe),
+        forbidden_paths: Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Grading
+// ---------------------------------------------------------------------------
+
+/// Grade a response string against a task in a fresh workspace under `scratch`.
+fn grade(
+    task: &Task,
+    response: &str,
+    scratch_root: &Path,
+    tag: &str,
+    wall_timeout_secs: u64,
+) -> Result<OracleVector, Box<dyn std::error::Error>> {
+    let ws = scratch_root.join(tag);
+    if ws.exists() {
+        std::fs::remove_dir_all(&ws)?;
+    }
+    std::fs::create_dir_all(&ws)?;
     let limits = bench_sandbox::Limits {
         wall: std::time::Duration::from_secs(wall_timeout_secs),
-        // Far CPU backstop: 30x the wall so the wall clock is always the primary
-        // limit even for a multi-threaded test binary (see BUILD-LOG).
         cpu: std::time::Duration::from_secs(wall_timeout_secs.saturating_mul(30)),
         address_space: None,
     };
     let spec = bench_oracle::GradeSpec {
-        answer_path: Path::new(&manifest.answer_path),
-        weights: &weights,
-        behavior_test: ocfg.behavior_test.as_deref(),
-        differential_test: ocfg.differential_test.as_deref(),
-        alloc_test: ocfg.alloc_test.as_deref(),
+        answer_path: Path::new(&task.answer_path),
+        weights: &task.weights,
+        behavior_test: task.behavior_test.as_deref(),
+        differential_test: task.differential_test.as_deref(),
+        alloc_test: task.alloc_test.as_deref(),
         limits,
-        max_unsafe: ccfg.max_unsafe,
-        forbidden_paths: ccfg.forbidden_paths.clone(),
+        max_unsafe: task.max_unsafe,
+        forbidden_paths: task.forbidden_paths.clone(),
     };
+    Ok(bench_oracle::grade(&task.instance, response, &spec, &ws)?)
+}
 
+fn run(
+    task: Task,
+    base_url: &str,
+    model_name: &str,
+    out: &Path,
+    scratch_root: &Path,
+    wall_timeout_secs: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
     let containment = match bench_sandbox::available() {
         bench_sandbox::Containment::Seatbelt => "seatbelt",
         bench_sandbox::Containment::Unsupported => "unsupported",
@@ -241,17 +276,43 @@ fn run(
     if containment == "unsupported" {
         eprintln!("  ! warning: no sandbox on this platform — model code runs uncontained");
     }
+    println!(
+        "→ {} against {base_url} ({model_name}) [sandbox: {containment}]",
+        task.id
+    );
 
+    let client = ModelClient::new(base_url, model_name);
+    let completion = client.complete(
+        &task.system_prompt,
+        &task.prompt,
+        &SamplingConfig::default(),
+    )?;
+    println!(
+        "  ← {} completion tokens, finish={}, {} ms",
+        completion.completion_tokens, completion.finish_reason, completion.elapsed_ms
+    );
+
+    let unit = WorkUnit {
+        task_id: TaskId(task.id.clone()),
+        seed: Seed(0),
+        index: 0,
+    };
+    let tag = unit.unit_id().0.replace(':', "_");
     let grade_start = std::time::Instant::now();
-    let vector = bench_oracle::grade(&instance, &completion.text, &spec, &ws)?;
+    let vector = grade(
+        &task,
+        &completion.text,
+        scratch_root,
+        &tag,
+        wall_timeout_secs,
+    )?;
     let grade_ms = grade_start.elapsed().as_millis() as u64;
 
-    // --- write the journal line ---
     let line = JournalLine {
         schema: 1,
         unit_id: unit.unit_id().0,
-        task_id: manifest.id.clone(),
-        category: manifest.category.clone(),
+        task_id: task.id.clone(),
+        category: task.category.clone(),
         seed: unit.seed.0,
         index: unit.index,
         model: ModelInfo {
@@ -269,7 +330,6 @@ fn run(
         },
         failure_class: vector.failure_class,
     };
-
     append_journal(out, &line)?;
 
     println!(
@@ -293,7 +353,95 @@ fn run(
     Ok(())
 }
 
-/// Read a directory tree into a `path → contents` map, keyed relative to `root`.
+// ---------------------------------------------------------------------------
+// validate-family
+// ---------------------------------------------------------------------------
+
+fn validate_family(
+    fam: &str,
+    seeds: u64,
+    scratch: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let g = bench_gen::family(fam).ok_or_else(|| format!("unknown family `{fam}`"))?;
+    println!("validate-family {fam}: {seeds} seed(s)");
+    let mut failures = 0u32;
+
+    for seed in 0..seeds {
+        let gt = g.generate(seed);
+        let task = task_from_generated(&gt);
+
+        // Gate 1: determinism — same seed → byte-identical instance.
+        let gt2 = g.generate(seed);
+        let deterministic =
+            gt.prompt == gt2.prompt && gt.files == gt2.files && gt.hidden == gt2.hidden;
+
+        // Gate 2: the reference scores 1.0 (correct by construction, ADR-0003).
+        let ref_code = g.reference_code(seed);
+        let ref_v = grade(&task, &ref_code, scratch, &format!("ref-{seed}"), 120)?;
+
+        // Gate 3: the skeleton fails — ablation actually removed the answer.
+        let skel_code = g.skeleton_code(seed);
+        let skel_v = grade(&task, &skel_code, scratch, &format!("skel-{seed}"), 120)?;
+        let skel_behavior = skel_v.behavior.score.unwrap_or(0.0);
+
+        let ref_ok = ref_v.score >= 0.99;
+        let skel_ok = skel_behavior < 0.5;
+        let all = deterministic && ref_ok && skel_ok;
+        if !all {
+            failures += 1;
+        }
+        println!(
+            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton_behavior={:.3}{}",
+            if all { "OK  " } else { "FAIL" },
+            deterministic,
+            ref_v.score,
+            if ref_ok { "" } else { " <-- expected 1.0" },
+            skel_behavior,
+            if skel_ok { "" } else { " <-- expected <0.5" },
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(scratch);
+    if failures == 0 {
+        println!("all gates passed");
+        Ok(())
+    } else {
+        Err(format!("{failures} seed(s) failed validation").into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Journal + fs
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct JournalLine {
+    schema: u32,
+    unit_id: String,
+    task_id: String,
+    category: String,
+    seed: u64,
+    index: u32,
+    model: ModelInfo,
+    sandbox: String,
+    oracle: OracleVector,
+    cost: Cost,
+    failure_class: FailureClass,
+}
+#[derive(Serialize)]
+struct ModelInfo {
+    name: String,
+    base_url: String,
+    finish_reason: String,
+}
+#[derive(Serialize)]
+struct Cost {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    gen_ms: u64,
+    grade_ms: u64,
+}
+
 fn read_tree(root: &Path) -> std::io::Result<BTreeMap<PathBuf, String>> {
     let mut map = BTreeMap::new();
     if !root.exists() {
@@ -324,7 +472,6 @@ fn append_journal(out: &Path, line: &JournalLine) -> std::io::Result<()> {
         .create(true)
         .append(true)
         .open(out)?;
-    let json = serde_json::to_string(line)?;
-    writeln!(f, "{json}")?;
+    writeln!(f, "{}", serde_json::to_string(line)?)?;
     f.flush()
 }

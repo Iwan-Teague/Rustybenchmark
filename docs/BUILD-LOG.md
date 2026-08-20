@@ -8,6 +8,61 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P3 (first increment) — bench-gen: seeded solution-first generation
+
+**What.** The pivotal phase begins: tasks stop being frozen files and become
+**seeded generators**. A family is a function from a seed to a fresh instance,
+its reference, its oracle, and the skeleton — all built from the same seed,
+solution-first, so the oracle is correct by construction (ADR-0003).
+
+`bench-gen` provides seed derivation (blake3), canary minting, a SplitMix64 PRNG
+(pure in the seed), the `Generator` trait, and one real family: **`window-op`**
+(category `borrow-lifetimes`). Crucially the *operation itself* is seed-selected
+— Reverse / RotateLeft(k) / SwapEnds — so a seed changes the logic a model must
+write, not just identifiers. From the sampled op the generator derives the
+reference source, the worked example outputs (computed natively so they are
+correct), the differential oracle (embedded reference + generated inputs), the
+alloc test, and the ablated `todo!()` skeleton.
+
+**`rustybench validate-family` runs the construction gates** (ADR-0003), over
+every seed and with no model:
+
+```
+seed   0..7: OK  determinism=true  reference=1.000  skeleton_behavior=0.000
+all gates passed
+```
+
+- **Determinism** — same seed → byte-identical instance.
+- **Reference passes its own oracle (1.000)** — the synthesised reference,
+  graded through the *full* pipeline (compile · behaviour · differential ·
+  alloc · unsafe), scores perfect. This is the load-bearing self-consistency
+  check: reference, example outputs and differential all agree, so a buggy
+  generator is caught here, not in the field.
+- **Skeleton fails (behaviour 0.0)** — the ablation genuinely removed the answer.
+
+**Full loop against the live 3B, on tasks it has never seen.** `rustybench run
+--family window-op --seed N` generates → prompts the model → grades under the
+sandbox. Two seeds, genuinely different operations:
+
+```
+seed 3  op=reverse       fn=rework_segments  score 0.751  unit 0.6  diff 0.0  logic
+seed 5  op=rotate_left(3) fn=map_frames       score 0.751  unit 0.6  diff 0.0  logic
+```
+
+Different operations and names — the anti-memorisation property. The 3B wrote a
+windowed reverse whose `(w..v.len()).step_by(w)` loop **misses the last full
+window** — a real off-by-one, caught partially by the unit tests (3/5) and fully
+by the differential oracle (which is exactly why the differential oracle exists).
+The identical 0.751 is coincidental.
+
+**Scope of this increment:** one parametric family, three construction gates. Not
+yet: the compositional archetype, the anti-twin distance gate, the remaining
+`validate-family` checks (trivial-baselines-fail, prompt has one canary), and the
+seed→instance server issuance the integrity model needs. 43 tests across seven
+crates; clippy clean under `-D warnings`; fmt clean.
+
+---
+
 ## 2026-08-19 · bench-invariants — the doc-arithmetic CI gate (round 6's ask)
 
 **What.** Round 6 asked for "one script that recomputes every published table
