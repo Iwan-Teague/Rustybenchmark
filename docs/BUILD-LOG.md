@@ -8,6 +8,29 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Q31 decided — spec-diversity as the authoritative task-diversity measure
+
+Acting on the Q31 finding (previous entry), and on the "two gates" decision: added a
+`spec_signature(seed)` method to the `Generator` trait — the structural choices that define the *skill*,
+with numeric constants and identifiers excluded — plus `spec_diversity(gen, n)` counting distinct
+signatures. That count is now the authoritative, ungameable diversity number, reported by
+`validate-family` and pinned as a regression test.
+
+Granularity: `AtMost(10)` and `AtMost(50)` share a signature (same skill, different constant); constants
+still vary the prompt so they still count under the view (contamination) gate, they just don't inflate
+diversity. Measured and pinned:
+
+- `window-op`: **12** distinct skills (6 in-place ops × 2 strides)
+- `error-handling`: **30** distinct skills (5 combines × 6 rule-types)
+
+Both clear any plausible per-epoch seed count, and — unlike the text proxies — these numbers can be
+neither inflated by example noise nor deflated by shared boilerplate. `validate-family` now prints, per
+family: view-distance, reference-distance, view/reference capacity, and spec-diversity — the full honest
+picture in one place. Q31 marked decided; the per-family diversity *floor* stays open (it depends on the
+Phase-4 per-epoch seed count) and folds back into Q30. 63 workspace tests; clippy/fmt clean.
+
+---
+
 ## 2026-08-20 · Widened `window-op` — and it exposed that the anti-twin metric is unreliable (Q31)
 
 Set out to raise `window-op`'s tight capacity (8) with the same lever that "fixed" `error-handling`:

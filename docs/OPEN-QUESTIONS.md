@@ -512,7 +512,7 @@ to serve a twin, returning `Exhausted` instead).
 
 ---
 
-## Q31 — The text-distance anti-twin metric is unreliable; task identity is structural · **BLOCKING**
+## Q31 — The text-distance anti-twin metric is unreliable; task identity is structural · **DECIDED (two gates)**
 
 **Blocks:** the `min_instance_distance` gate design, and every family's reported capacity. Found
 2026-08-20 while widening `window-op` ([BUILD-LOG](BUILD-LOG.md)).
@@ -565,4 +565,26 @@ the gap is visible, and the epoch sampler still serves on view-distance (which, 
 rarely rejects anything — its guarantee is real but currently near-vacuous for these two families).
 The capacity regression tests are pinned on **reference**-capacity, the honest number.
 
-Decision needed before the corpus is scaled: which of the three, and what the per-family floor becomes.
+**Decided 2026-08-20: option 3 — two gates, two purposes.**
+
+- **Spec-distance = task diversity.** Each generator now exposes `spec_signature(seed)` — the structural
+  choices that define the *skill*. `spec_diversity(gen, n)` counts distinct signatures; that count is the
+  authoritative, ungameable diversity number a family is authored against. `validate-family` reports it.
+- **View-distance = contamination-resistance.** Kept as-is: it guards against serving a prompt the model
+  may have seen verbatim, which is a real and separate purpose. The epoch sampler continues to serve on
+  it so within-epoch prompts stay fresh.
+- Reference-distance stays reported as a diagnostic (it is what first exposed the gap) but is not a gate.
+
+**Granularity decision (the sub-question):** the spec-signature includes the operation kind, the rule
+*type*, and the stride pattern, but **excludes numeric constants** — `AtMost(10)` and `AtMost(50)` are
+the *same skill* with a different constant, so they share a signature. Constants still vary the prompt,
+so they still count toward contamination-resistance under the view gate; they just do not inflate the
+diversity count. Measured under this rule: `window-op` = **12** distinct skills (6 ops × 2 strides),
+`error-handling` = **30** (5 combines × 6 rule-types). Both clear any per-epoch seed count, both pinned
+as regression tests.
+
+**Still open, downstream:** the per-family *floor* — the minimum spec-diversity a family must clear to
+ship — is not yet fixed; it depends on the per-epoch seed count chosen in Phase 4, and it folds back into
+[Q30](#q30--anti-twin-variance-is-per-family-not-global). And the epoch sampler arguably should *also*
+reject within-epoch spec-collisions (serve distinct skills, not just distinct prompts); deferred until
+the per-epoch count is known.

@@ -132,6 +132,29 @@ pub trait Generator {
     fn trivial_baselines(&self, _seed: u64) -> Vec<(String, String)> {
         Vec::new()
     }
+
+    /// The structural identity of the task `seed` produces: the generative choices
+    /// that define the *skill*, excluding cosmetic variation (identifiers, numeric
+    /// constants, worked-example data). Two seeds with the same signature test the
+    /// same skill; the count of distinct signatures is the family's genuine task
+    /// diversity — the measure that is neither inflatable by example noise nor
+    /// deflatable by shared boilerplate (docs/OPEN-QUESTIONS.md Q31). Returned as a
+    /// set of feature tokens; order is not significant.
+    fn spec_signature(&self, seed: u64) -> Vec<String>;
+}
+
+/// The number of distinct [`Generator::spec_signature`]s over `seed = 0..upto` —
+/// a family's genuine, ungameable task diversity (Q31). This is a family-quality
+/// measure checked at authoring time, distinct from the per-epoch view-distance
+/// the sampler enforces to keep served prompts fresh.
+pub fn spec_diversity(gen: &dyn Generator, upto: u64) -> usize {
+    let mut seen = std::collections::HashSet::new();
+    for s in 0..upto {
+        let mut sig = gen.spec_signature(s);
+        sig.sort();
+        seen.insert(sig.join("|"));
+    }
+    seen.len()
 }
 
 /// Look up a family by id.
@@ -173,5 +196,20 @@ mod tests {
         for _ in 0..10 {
             assert_eq!(a.next_u64(), b.next_u64());
         }
+    }
+
+    #[test]
+    fn spec_diversity_is_the_structural_count() {
+        // The honest, ungameable task-diversity ceiling (Q31): distinct structural
+        // specs, constants excluded. window-op = 6 ops x 2 strides; error-handling
+        // = 5 combines x 6 rule-types. Pinned so narrowing a surface fails loudly.
+        assert_eq!(
+            spec_diversity(family("window-op").unwrap().as_ref(), 4000),
+            12
+        );
+        assert_eq!(
+            spec_diversity(family("error-handling").unwrap().as_ref(), 4000),
+            30
+        );
     }
 }

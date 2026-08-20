@@ -180,11 +180,12 @@ Widening the variable surface (Q30 lever 2) — combine operations 3 → 5, vali
 seed-varied worked examples — raised the *view*-distance to median **0.438** with **0 near-twin
 prompts**. But that lift is mostly illusory: measured on the **solution** rather than the prompt, this
 family's distinct-at-floor capacity is only **7**, with **12/28** reference near-twins — the pinned-enum
-plumbing dominates every solution, so 5 × 12 = 60 nominal combine/rule logics collapse to a handful of
-genuinely-distinct answers. The seed-varied examples freshen the prompt (contamination-resistance) but
-do not add solution diversity. This is exactly why the family "tests plumbing, not error design", and it
-is the concrete evidence behind [Q31](OPEN-QUESTIONS.md); see also [Q3](OPEN-QUESTIONS.md) /
-[Q30](OPEN-QUESTIONS.md).
+plumbing dominates every solution. The seed-varied examples freshen the prompt (contamination-resistance)
+but do not add solution diversity. This is exactly why the family "tests plumbing, not error design", and
+it is the concrete evidence behind [Q31](OPEN-QUESTIONS.md). Under Q31's decided measure — distinct
+structural specs (constants excluded) — `error-handling`'s authoritative diversity is **30 skills**
+(5 combines × 6 rule-types), comfortably above a per-epoch seed count even though its *solution* text is
+highly repetitive. See also [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
 
 ## Per-category oracle weights
 

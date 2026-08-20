@@ -495,8 +495,15 @@ fn validate_family(
             };
         let ref_cap = bench_gen::epoch::reference_capacity(g.as_ref(), 400, floor);
         println!(
-            "  capacity   view={view_cap}  reference={ref_cap}  (reference is the honest solution-diversity ceiling — Q31)"
+            "  capacity   view={view_cap}  reference={ref_cap}  (text proxies — view over-counts, reference under-counts)"
         );
+
+        // The authoritative diversity number (Q31, decided): distinct structural
+        // specs, ungameable by example noise and undeflated by boilerplate. This is
+        // the count a family is authored against; view-distance is a separate gate
+        // for prompt freshness (contamination-resistance).
+        let diversity = bench_gen::spec_diversity(g.as_ref(), 4000);
+        println!("  spec-diversity: {diversity} distinct skills (the authoritative task-diversity measure — Q31)");
     }
 
     let _ = std::fs::remove_dir_all(scratch);

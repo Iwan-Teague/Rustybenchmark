@@ -519,6 +519,23 @@ impl Generator for ErrorHandlingFamily {
             ("unwrap".to_string(), unwrap_version(&spec)),
         ]
     }
+
+    fn spec_signature(&self, seed: u64) -> Vec<String> {
+        // The skill is the combine operation and the rule *type*. Rule bounds
+        // (`AtMost(10)` vs `AtMost(50)`) are constant parameters of the same skill
+        // (Q31 granularity), and the function name is cosmetic — both excluded.
+        let spec = sample(seed);
+        let combine = format!("{:?}", spec.combine);
+        let rule = match spec.rule {
+            Rule::NonNegative => "NonNegative",
+            Rule::AtMost(_) => "AtMost",
+            Rule::NonZero => "NonZero",
+            Rule::AtLeast(_) => "AtLeast",
+            Rule::InRange(_, _) => "InRange",
+            Rule::Even => "Even",
+        };
+        vec![format!("combine:{combine}"), format!("rule:{rule}")]
+    }
 }
 
 #[cfg(test)]

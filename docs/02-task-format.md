@@ -232,11 +232,14 @@ which that family must be enlarged.
 *view*-capacity from 3 to hundreds, but measuring on the **solution** instead of the prompt shows a true
 capacity of only **7**: the seed-varied examples freshen the prompt without changing the answer. So
 distance-on-view is gameable and distance-on-reference is deflated by shared boilerplate; **neither text
-metric is task diversity**, which is the structural spec count. This is [Q31](OPEN-QUESTIONS.md), and
-until it is resolved `validate-family` reports *both* view- and reference-distance (and both capacities)
-so the gap is visible, and capacity is pinned on the honest reference number. The lesson for authoring:
-design the variable surface for genuine *solution* diversity, and do not trust a healthy view-distance
-line on its own.
+metric is task diversity**, which is the structural spec count. This is [Q31](OPEN-QUESTIONS.md),
+**decided as two gates**: a generator's `spec_signature(seed)` names the structural choices that define
+the skill (constants excluded), and `spec_diversity` counts distinct signatures — the authoritative,
+ungameable diversity number a family is authored against (`window-op` 12 skills, `error-handling` 30).
+View-distance is kept as a *separate* gate for contamination-resistance (has the model seen this exact
+prompt), and `validate-family` reports spec-diversity, both distances, and both capacities. The lesson
+for authoring: design the variable surface for genuine *skill* diversity, and never trust a healthy
+view-distance line on its own.
 
 ## Generator validation (CI, ≥1000 seeds per family)
 

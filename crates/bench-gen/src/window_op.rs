@@ -451,6 +451,22 @@ impl Generator for WindowOpFamily {
             ("identity".to_string(), identity(&spec)),
         ]
     }
+
+    fn spec_signature(&self, seed: u64) -> Vec<String> {
+        // The skill is the operation kind and the stride pattern. The rotate
+        // amount `k` is a constant parameter of the same skill (Q31 granularity),
+        // and the function name is cosmetic — both excluded.
+        let spec = sample(seed);
+        let op = match spec.op {
+            Op::Reverse => "reverse",
+            Op::RotateLeft(_) => "rotate_left",
+            Op::RotateRight(_) => "rotate_right",
+            Op::SwapEnds => "swap_ends",
+            Op::Negate => "negate",
+            Op::AddConst(_) => "add_const",
+        };
+        vec![format!("op:{op}"), format!("stride:{}", spec.stride)]
+    }
 }
 
 #[cfg(test)]
