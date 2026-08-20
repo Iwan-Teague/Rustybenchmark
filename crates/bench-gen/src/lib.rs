@@ -22,6 +22,7 @@ pub mod error_handling;
 pub mod grid_reduce;
 pub mod seq_transform;
 pub mod stack_machine;
+pub mod string_processing;
 pub mod traits_generics;
 pub mod unsafe_core;
 pub mod window_op;
@@ -174,6 +175,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "trait-impl",
     "bit-ops",
     "raw-ptr",
+    "str-transform",
 ];
 
 /// Look up a family by id.
@@ -187,6 +189,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "trait-impl" => Some(Box::new(traits_generics::TraitsGenericsFamily)),
         "bit-ops" => Some(Box::new(bit_manipulation::BitManipulationFamily)),
         "raw-ptr" => Some(Box::new(unsafe_core::UnsafeCoreFamily)),
+        "str-transform" => Some(Box::new(string_processing::StringProcessingFamily)),
         _ => None,
     }
 }
@@ -276,6 +279,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("raw-ptr").unwrap().as_ref(), 4000),
             20
+        );
+        // str-transform = 4 filters x 3 case-maps x 2 orders.
+        assert_eq!(
+            spec_diversity(family("str-transform").unwrap().as_ref(), 4000),
+            24
         );
     }
 }

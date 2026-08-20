@@ -8,6 +8,43 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Ninth family: `str-transform` (category `string-processing`)
+
+More corpus breadth (P7): a text-processing shape. The model implements `fn f(s: &str) -> String` as a
+seed-selected three-stage pipeline — **filter** (Alpha / Alnum / NonSpace / All) → **case-map** (Upper /
+Lower / SwapCase) → **order** (InOrder / Reversed) = 4 × 3 × 2 = **24 distinct skills**, the widest surface
+of the families authored tonight. Everything is ASCII-only by construction (the maps are the `to_ascii_*`
+family, the fuzzer draws printable-ASCII bytes 0x20..0x7e), so there are no UTF-8 char-boundary hazards —
+the string analogue of the arithmetic families bounding their inputs against overflow.
+
+Solution-first / correct-by-construction (ADR-0003): native `eval` and the emitted reference are mirrored
+(`s.chars().filter(…).map(…).collect()`, optional `.rev()`); the differential fuzzes 3000 random ASCII
+strings. The two trivial baselines (`identity`, `empty`) are caught on every seed because every case-map is
+a genuine transform (never identity) and the canonical example `"Hello, World!"` carries both cases plus
+punctuation and a space, so all 24 combinations change it and leave it non-empty (pinned as a test).
+
+Like `bit-ops`, this is a textually-healthy family — the short pipeline body changes visibly with the op,
+so all three anti-memorisation numbers agree:
+
+```
+view       min=0.257 median=0.446 near-twins 0/28
+reference  min=0.273 median=0.536 near-twins 0/28   capacity=56
+spec-diversity: 24 distinct skills
+```
+
+Registered in `FAMILY_IDS` and the `spec_diversity` pin (== 24) in the same commit. **The corpus now spans
+9 families across 9 categories** (`borrow-lifetimes`, `error-handling`, `pattern-matching`, `iterators`,
+`data-structures`, `traits-generics`, `bit-manipulation`, `unsafe-core`, `string-processing`) — 4 of
+docs/04's 5 core categories, only `idiom-refactor` (the compositional/inverse-transform archetype) still
+uncovered. 137 workspace tests (+6); `validate-family --seeds 8` all gates green; clippy `-D warnings` and
+`cargo fmt --check` clean.
+
+(Clippy caught an `enum_variant_names` on the first cut — every `Filter` variant was prefixed `Keep`;
+renamed to `Alpha`/`Alnum`/`NonSpace`/`All`. The gate earning its keep on generator code, not just on
+graded answers.)
+
+---
+
 ## 2026-08-20 · Eighth family: `raw-ptr` (category `unsafe-core`) — with an honest miri caveat
 
 `unsafe-core` is docs/04 core #5, and this covers it — bringing core coverage to **4 of 5**
