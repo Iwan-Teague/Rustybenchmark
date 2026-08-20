@@ -8,6 +8,32 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `bench-stats` — paired McNemar + precomputation sign test
+
+Added the two paired detectors from the Q29 decisions, plus the exact binomial-tail engine both need.
+
+- **McNemar** (`mcnemar`) on the shared `passed` bits: discordant counts (A-only / B-only), the exact
+  two-sided binomial p-value on the discordant split (continuity-corrected χ² reported alongside), and a
+  normal-approx fallback above 1024 discordant pairs where `0.5^n` underflows.
+- **`compare_models`**: aligns two models' journals by `task_id` (the paired design), runs McNemar, and
+  adds a **paired, family-clustered studentised wild-bootstrap CI** on the pass-rate difference — the
+  clustered interval doc 07 requires beside the discordant count. Wired as `rustybench compare
+  --journal-a --journal-b`.
+- **Sign test** (`sign_test`) for precomputation (Q29.1): one-sided upper-tail binomial on the
+  `pick-one` core-vs-probe discordant split, flagging when the predictable core beats the fresh probe.
+  Default detector α = 0.01 (an accusation wants a low false-positive rate). It is a pure statistic for
+  now — it begins running on real data once the epoch protocol emits labelled fresh-probe units
+  (ADR-0009).
+- Exact-tail helper `binom_cdf_le_half` (stable pmf recursion, normal approx above 1024) with an
+  A&S erf; unit-tested against known binomial CDF values.
+
+Demonstrated end-to-end: `compare` over a 6-unit paired pair of journals prints discordant counts, the
+exact p, and the Δ pass-rate with its paired CI (correctly *not* significant on 6 units — the tests
+prove the significant path on larger synthetic data). 15 crate tests (+5); workspace 94; clippy/fmt
+clean.
+
+---
+
 ## 2026-08-20 · `bench-stats` — studentised the wild cluster bootstrap (coverage 0.90 → 0.95)
 
 Upgraded the wild cluster bootstrap to the **studentised (percentile-t)** form. Each replicate now

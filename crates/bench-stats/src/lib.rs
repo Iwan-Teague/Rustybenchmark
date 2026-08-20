@@ -20,12 +20,14 @@
 //!   Categories with too few families are marked **directional-only**.
 //! - **Multiplicity**: per-category CIs shown together are **simultaneous** —
 //!   Bonferroni level `1 − α/K` across the `K` categories reported (Q29.4).
+//! - **Model comparison** is McNemar on the shared `passed` bits plus a paired,
+//!   family-clustered wild-bootstrap CI on the pass-rate difference; the
+//!   **precomputation detector** is the one-sided sign test on `pick-one`
+//!   core-vs-probe bits (Q29.1).
 //!
-//! Not yet implemented (tracked): the wild cluster bootstrap for few-cluster
-//! coverage, shape-level resampling (Q24), the paired McNemar / sign-test
-//! detectors, and ICC estimation. This increment establishes the load-bearing
-//! path — capability, pass-rate, and honest cluster-bootstrap CIs — that those
-//! extend.
+//! Not yet implemented (tracked): shape-level resampling (Q24) and ICC
+//! estimation; and the sign test is a pure statistic here — it starts running on
+//! real data once the epoch protocol emits labelled fresh-probe units (ADR-0009).
 
 use bench_core::OracleVector;
 use serde::Deserialize;
@@ -396,6 +398,205 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Binomial tail helpers (exact for small n, normal approx for large)
+// ---------------------------------------------------------------------------
+
+/// Above this cluster/discordant count the exact `0.5^n` term underflows f64, so the
+/// binomial tail switches to the continuity-corrected normal approximation.
+const EXACT_BINOM_MAX: u32 = 1024;
+
+/// erf via Abramowitz–Stegun 7.1.26 (abs error < 1.5e-7). Used only for the large-n
+/// normal approximation of the binomial tail.
+fn erf(x: f64) -> f64 {
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = x.abs();
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let y = 1.0
+        - (((((1.061_405_429 * t - 1.453_152_027) * t) + 1.421_413_741) * t - 0.284_496_736) * t
+            + 0.254_829_592)
+            * t
+            * (-x * x).exp();
+    sign * y
+}
+
+fn normal_cdf(z: f64) -> f64 {
+    0.5 * (1.0 + erf(z / std::f64::consts::SQRT_2))
+}
+
+/// `P(X ≤ m)` for `X ~ Binomial(n, 0.5)`. Exact for `n ≤ EXACT_BINOM_MAX` via a stable
+/// pmf recursion (`pmf(k) = pmf(k−1)·(n−k+1)/k`), else a continuity-corrected normal
+/// approximation. The engine behind both the McNemar and sign-test p-values.
+fn binom_cdf_le_half(n: u32, m: u32) -> f64 {
+    if n == 0 || m >= n {
+        return 1.0;
+    }
+    if n <= EXACT_BINOM_MAX {
+        let mut pmf = 0.5f64.powi(n as i32);
+        let mut cdf = pmf;
+        for k in 1..=m {
+            pmf *= (n - k + 1) as f64 / k as f64;
+            cdf += pmf;
+        }
+        cdf.min(1.0)
+    } else {
+        let mean = n as f64 / 2.0;
+        let sd = (n as f64 / 4.0).sqrt();
+        normal_cdf((m as f64 + 0.5 - mean) / sd)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Model comparison (McNemar) and precomputation detection (sign test)
+// ---------------------------------------------------------------------------
+
+/// Detector significance level for the sign test: a precomputation *accusation* wants a
+/// low false-positive rate, so the default is stricter than a typical 0.05.
+pub const DETECTOR_ALPHA: f64 = 0.01;
+
+fn family_of(task_id: &str) -> &str {
+    task_id.split('/').next().unwrap_or(task_id)
+}
+
+/// McNemar's test on paired binary outcomes (docs/07: model comparison on the shared
+/// `passed` bit). `discordant_a_only` = A passed while B failed; `discordant_b_only` the
+/// reverse. Concordant pairs carry no information and are ignored. `p_value` is the
+/// **exact** two-sided binomial test on the discordant split (normal-approx above
+/// `EXACT_BINOM_MAX`); `statistic` is the continuity-corrected χ² for reference.
+#[derive(Clone, Debug)]
+pub struct McNemar {
+    pub discordant_a_only: u32,
+    pub discordant_b_only: u32,
+    pub statistic: f64,
+    pub p_value: f64,
+}
+
+pub fn mcnemar(pairs: &[(bool, bool)]) -> McNemar {
+    let mut a_only = 0u32;
+    let mut b_only = 0u32;
+    for &(a, b) in pairs {
+        match (a, b) {
+            (true, false) => a_only += 1,
+            (false, true) => b_only += 1,
+            _ => {}
+        }
+    }
+    let n = a_only + b_only;
+    let statistic = if n == 0 {
+        0.0
+    } else {
+        let d = (a_only as f64 - b_only as f64).abs() - 1.0;
+        d.max(0.0).powi(2) / n as f64
+    };
+    let p_value = if n == 0 {
+        1.0
+    } else {
+        (2.0 * binom_cdf_le_half(n, a_only.min(b_only))).min(1.0)
+    };
+    McNemar {
+        discordant_a_only: a_only,
+        discordant_b_only: b_only,
+        statistic,
+        p_value,
+    }
+}
+
+/// One-sided sign test for precomputation (docs/07, Q29.1). Each pair is
+/// `(core_bit, probe_bit)` for one family, where the core bit is the **pick-one**
+/// collapse (a single designated core seed) — the only collapse that preserves the null.
+/// `core_wins` = core passed while the fresh probe failed. Under H0 (no precomputation,
+/// core and probe equally hard) `core_wins ~ Binomial(n_discordant, 0.5)`; `p_value` is
+/// the upper tail `P(X ≥ core_wins)`, and `flagged` is `p < threshold`.
+#[derive(Clone, Debug)]
+pub struct SignTest {
+    pub core_wins: u32,
+    pub probe_wins: u32,
+    pub p_value: f64,
+    pub flagged: bool,
+}
+
+pub fn sign_test(pairs: &[(bool, bool)], threshold: f64) -> SignTest {
+    let mut core_wins = 0u32;
+    let mut probe_wins = 0u32;
+    for &(core, probe) in pairs {
+        match (core, probe) {
+            (true, false) => core_wins += 1,
+            (false, true) => probe_wins += 1,
+            _ => {}
+        }
+    }
+    let n = core_wins + probe_wins;
+    // P(X ≥ core_wins) = P(X ≤ n − core_wins) by the symmetry of Binomial(n, 0.5).
+    let p_value = if n == 0 {
+        1.0
+    } else {
+        binom_cdf_le_half(n, n - core_wins)
+    };
+    SignTest {
+        core_wins,
+        probe_wins,
+        p_value,
+        flagged: p_value < threshold,
+    }
+}
+
+/// A paired model-vs-model comparison over the shared scored units.
+#[derive(Clone, Debug)]
+pub struct ModelComparison {
+    pub n_paired: usize,
+    pub mcnemar: McNemar,
+    /// Pooled pass-rate difference, model B minus model A.
+    pub delta_pass_rate: f64,
+    /// Studentised wild cluster bootstrap CI of the pass-rate difference, clustered by
+    /// family — the clustered interval to state alongside McNemar's discordant count.
+    pub delta_ci: (f64, f64),
+}
+
+/// Compare two models graded on the identical seed set (the paired design, docs/07).
+/// Units are aligned by `task_id`; only shared units are used.
+pub fn compare_models(a: &[Record], b: &[Record]) -> ModelComparison {
+    compare_models_with(a, b, BOOTSTRAP_ITERS)
+}
+
+pub fn compare_models_with(a: &[Record], b: &[Record], iters: usize) -> ModelComparison {
+    let index = |recs: &[Record]| -> BTreeMap<String, bool> {
+        recs.iter()
+            .map(|r| (r.task_id.clone(), r.passed()))
+            .collect()
+    };
+    let ma = index(a);
+    let mb = index(b);
+
+    let mut pairs = Vec::new();
+    let mut diffs: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for (tid, &ap) in &ma {
+        if let Some(&bp) = mb.get(tid) {
+            pairs.push((ap, bp));
+            let d = (bp as i32 - ap as i32) as f64;
+            diffs.entry(family_of(tid).to_string()).or_default().push(d);
+        }
+    }
+
+    let mcnemar = mcnemar(&pairs);
+    let n_paired = pairs.len();
+    let total: f64 = diffs.values().flatten().sum();
+    let count: usize = diffs.values().map(|v| v.len()).sum();
+    let delta_pass_rate = if count == 0 {
+        f64::NAN
+    } else {
+        total / count as f64
+    };
+    let mut rng = Rng::new(0x5EED_C0DE_D1FF_0001);
+    let delta_ci = bootstrap_category(&diffs, iters, ALPHA, &mut rng);
+
+    ModelComparison {
+        n_paired,
+        mcnemar,
+        delta_pass_rate,
+        delta_ci,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,5 +743,81 @@ mod tests {
             "behaviour 1.0, no failing constraint → pass"
         );
         assert!((recs[0].score() - 0.9).abs() < 1e-6); // score is f32-origin
+    }
+
+    #[test]
+    fn binomial_tail_matches_known_values() {
+        // P(X ≤ 5) for Binomial(10, 0.5) = 0.6230; P(X ≤ 10) for Binomial(20, 0.5) = 0.5881.
+        assert!((binom_cdf_le_half(10, 5) - 0.6230).abs() < 1e-3);
+        assert!((binom_cdf_le_half(20, 10) - 0.5881).abs() < 1e-3);
+        assert_eq!(binom_cdf_le_half(10, 10), 1.0);
+        assert!((normal_cdf(0.0) - 0.5).abs() < 1e-6);
+        assert!((normal_cdf(1.959_964) - 0.975).abs() < 1e-3);
+    }
+
+    #[test]
+    fn mcnemar_counts_and_significance() {
+        // Balanced discordant split → not significant.
+        let balanced = vec![(true, false), (false, true), (true, true), (false, false)];
+        let m = mcnemar(&balanced);
+        assert_eq!((m.discordant_a_only, m.discordant_b_only), (1, 1));
+        assert!(m.p_value > 0.5);
+        // Lopsided: A beats B on 10 units, none the other way → significant.
+        let lopsided: Vec<(bool, bool)> = (0..10).map(|_| (true, false)).collect();
+        let m = mcnemar(&lopsided);
+        assert_eq!((m.discordant_a_only, m.discordant_b_only), (10, 0));
+        assert!(m.p_value < 0.01, "p = {}", m.p_value);
+        // No discordant pairs → no evidence.
+        assert_eq!(mcnemar(&[(true, true), (false, false)]).p_value, 1.0);
+    }
+
+    #[test]
+    fn sign_test_flags_only_a_core_advantage() {
+        // Core systematically beats the fresh probe → precomputation flagged.
+        let suspicious: Vec<(bool, bool)> = (0..10).map(|_| (true, false)).collect();
+        let s = sign_test(&suspicious, DETECTOR_ALPHA);
+        assert_eq!((s.core_wins, s.probe_wins), (10, 0));
+        assert!(s.flagged && s.p_value < DETECTOR_ALPHA);
+        // Balanced discordance (honest run) → not flagged, one-sided p near 0.5+.
+        let honest = vec![(true, false), (false, true), (true, false), (false, true)];
+        let s = sign_test(&honest, DETECTOR_ALPHA);
+        assert!(!s.flagged);
+        // A probe *advantage* is never precomputation, so never flagged.
+        let probe_better: Vec<(bool, bool)> = (0..10).map(|_| (false, true)).collect();
+        assert!(!sign_test(&probe_better, DETECTOR_ALPHA).flagged);
+    }
+
+    #[test]
+    fn compare_models_pairs_by_task_id() {
+        // Model A passes families f0,f1 (2 seeds each); model B passes only f0.
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        for fam in ["f0", "f1"] {
+            for u in 0..2 {
+                a.push(Record::synthetic("c", fam, u, 1.0, true));
+                let b_pass = fam == "f0";
+                b.push(Record::synthetic("c", fam, u, 1.0, b_pass));
+            }
+        }
+        let cmp = compare_models_with(&a, &b, 2000);
+        assert_eq!(cmp.n_paired, 4);
+        // On f1's 2 units A passed and B failed → 2 discordant, all A-only.
+        assert_eq!(cmp.mcnemar.discordant_a_only, 2);
+        assert_eq!(cmp.mcnemar.discordant_b_only, 0);
+        // B minus A pass-rate is negative (B is worse).
+        assert!(cmp.delta_pass_rate < 0.0);
+        assert!(cmp.delta_ci.0 <= cmp.delta_pass_rate && cmp.delta_pass_rate <= cmp.delta_ci.1);
+    }
+
+    #[test]
+    fn compare_models_uses_only_shared_units() {
+        // A has an extra unit B never ran; it must be dropped from the pairing.
+        let a = vec![
+            Record::synthetic("c", "f", 0, 1.0, true),
+            Record::synthetic("c", "f", 1, 1.0, true),
+        ];
+        let b = vec![Record::synthetic("c", "f", 0, 1.0, false)];
+        let cmp = compare_models_with(&a, &b, 500);
+        assert_eq!(cmp.n_paired, 1, "only the shared unit is compared");
     }
 }

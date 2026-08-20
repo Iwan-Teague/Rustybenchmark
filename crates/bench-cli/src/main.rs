@@ -63,6 +63,13 @@ enum Command {
         #[arg(long, default_value = "runs/journal.jsonl")]
         journal: PathBuf,
     },
+    /// Compare two models (McNemar on the shared pass bits + paired pass-rate CI).
+    Compare {
+        #[arg(long)]
+        journal_a: PathBuf,
+        #[arg(long)]
+        journal_b: PathBuf,
+    },
 }
 
 /// Everything needed to grade one task, from either source.
@@ -111,6 +118,10 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             scratch,
         } => validate_family(&family, seeds, &scratch),
         Command::Stats { journal } => stats(&journal),
+        Command::Compare {
+            journal_a,
+            journal_b,
+        } => compare(&journal_a, &journal_b),
     }
 }
 
@@ -585,6 +596,38 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
         "note: family-level cluster bootstrap ({} resamples) — a lower bound on CI width until shapes are labelled (Q24).",
         r.bootstrap_iters
     );
+    Ok(())
+}
+
+fn compare(a: &Path, b: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let ra = bench_stats::load_journal(a).map_err(|e| format!("reading {}: {e}", a.display()))?;
+    let rb = bench_stats::load_journal(b).map_err(|e| format!("reading {}: {e}", b.display()))?;
+    let cmp = bench_stats::compare_models(&ra, &rb);
+    if cmp.n_paired == 0 {
+        return Err("the two journals share no units (compare needs the paired seed set)".into());
+    }
+    let m = &cmp.mcnemar;
+    println!("paired over {} shared units", cmp.n_paired);
+    println!(
+        "McNemar: A-only={} B-only={} (discordant {}), chi2={:.3}, p={:.4}",
+        m.discordant_a_only,
+        m.discordant_b_only,
+        m.discordant_a_only + m.discordant_b_only,
+        m.statistic,
+        m.p_value,
+    );
+    println!(
+        "pass-rate difference (B - A) = {:+.3}  [{:+.3}, {:+.3}]  (95% paired wild cluster bootstrap)",
+        cmp.delta_pass_rate, cmp.delta_ci.0, cmp.delta_ci.1
+    );
+    let verdict = if m.p_value >= 0.05 {
+        "no significant difference (p >= 0.05)"
+    } else if cmp.delta_pass_rate > 0.0 {
+        "B significantly better (p < 0.05)"
+    } else {
+        "A significantly better (p < 0.05)"
+    };
+    println!("verdict: {verdict}");
     Ok(())
 }
 
