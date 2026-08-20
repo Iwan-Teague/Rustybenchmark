@@ -15,27 +15,32 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 
 ## Status
 
-**Building — P0 spine landed.** The design phase (16 docs, 10 ADRs, 6 adversarial review rounds) is under `docs/`. Code has now started, following the roadmap in [docs/14-roadmap.md](docs/14-roadmap.md).
+**Building — the generation + grading half works end to end (macOS).** The design phase (17 docs, 10 ADRs, 6 adversarial review rounds) is under `docs/`. Code follows the roadmap in [docs/14-roadmap.md](docs/14-roadmap.md); phases P0 (spine), P1 (sandbox), P2 (oracle depth) and much of P3 (generation) have landed.
 
-**P0 — the spine — works end to end.** `rustybench run` sends a frozen task to any OpenAI-compatible endpoint, grades the response with the real `cargo`/`rustc` toolchain, and writes a scored JSONL journal line. It discriminates a correct answer (score 1.0), a borrow-checker failure (score 0.0, `failure_class` = `borrowck`, derived from a real `E0499`), and a logic failure (score 0.2 = 1 of 5 hidden tests) — the P0 exit criterion.
+**What runs today.** `rustybench run` sends a task — a hand-frozen file or a **seed-generated** one — to any OpenAI-compatible endpoint, grades the response with the real `cargo`/`rustc` toolchain inside a sandbox, and writes a scored JSONL journal line. Tasks are generated *solution-first* so the oracle is correct by construction; three families across three categories now generate memorisation-measured, correct-by-construction tasks.
 
 ```
 crates/
-  bench-core     types, scoring, rustc-code → FailureClass    (pure, no I/O)
-  bench-model    OpenAI-compatible /v1/chat/completions client
-  bench-oracle   L0 apply · L1 compile+diagnostics · L2 unit tests
-  bench-cli      the `rustybench run` binary
-tasks/frozen/    a hand-written frozen task for the spine
+  bench-core        types, scoring, rustc-code → FailureClass       (pure, no I/O)
+  bench-gen         seed → task (3 families) · anti-twin + spec-diversity measures
+  bench-oracle      L0 apply · L1 compile · L2 behavior/differential · L3 syn AST
+  bench-sandbox     macOS seatbelt: no network, confined writes, wall-clock kill
+  bench-model       OpenAI-compatible /v1/chat/completions client
+  bench-cli         `rustybench run` + `validate-family`
+  bench-invariants  CI gate: recomputes every published statistic
 ```
 
 Build and try it:
 
 ```bash
-cargo test                 # 14 tests across the four crates
-cargo run -p bench-cli -- run --task tasks/frozen/split-mut-window --model http://localhost:8080
+cargo test                                                                    # 71 tests across the crates
+cargo run -p bench-cli -- validate-family --family stack-machine --seeds 8     # prove a family's generator is sound
+cargo run -p bench-cli -- run --family error-handling --seed 42 --model http://localhost:8080
 ```
 
-Still to come, per the roadmap: generation (P3), the sandbox (P1), resume (P4), and everything the review rounds flagged as blocking — the pass predicate on `task_score` (Q28), ρ (Q22), and the statistical machinery (Q29).
+**OS:** grading runs sandboxed on **macOS** (seatbelt). Linux/Windows containment is not built yet (roadmap gate G1).
+
+Still to come, per the roadmap: the statistics/aggregation layer (`bench-stats`) and the blocking design questions behind it — the pass predicate on `task_score` (Q28) and the statistical machinery (Q29); hardware profiling and upload; resume (P4); and the 272-family corpus (P7), of which **3** exist.
 
 ## Read order
 
@@ -58,6 +63,7 @@ Still to come, per the roadmap: generation (P3), the sandbox (P1), resume (P4), 
 | 13 | [docs/14-roadmap.md](docs/14-roadmap.md) | Build order and the minimum shippable product |
 | 14 | [docs/15-profiles-and-divisions.md](docs/15-profiles-and-divisions.md) | What the harness pins, gates, keys and frees; the Pinned / Tuned / Open divisions; weights identity; MCP |
 | 15 | [docs/16-value-and-data.md](docs/16-value-and-data.md) | What the individual runner gets, data sufficiency, the dataset licence, and what is explicitly out of scope |
+| 16 | [docs/17-authoring-families.md](docs/17-authoring-families.md) | How to add a generator family: the contract, the solution-first recipe, and the validation gates |
 
 Supporting:
 

@@ -8,6 +8,19 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Authoring guide (doc 17) + README refresh
+
+With three families now sharing a stable pattern, distilled it into [17-authoring-families.md](17-authoring-families.md):
+the `Generator` contract, the solution-first recipe (Spec → native `eval` → mirrored emitted reference →
+skeleton → prompt → oracle), the worked-example rule (seed-vary + one guaranteed-non-trivial case), the
+view-vs-spec-diversity distinction (Q31), the `validate-family` gate table, and the pitfalls the three
+families already hit (`i64::MIN` literals, differential overflow, empty test targets). This is the G3
+lever — a contributor copies the nearest of the three references and adapts it. Refreshed the README
+status (it still described P0 / 14 tests) to the current 7 crates, 71 tests, three families, macOS
+sandbox, and added doc 17 to the read-order table. Docs only.
+
+---
+
 ## 2026-08-20 · Third family: `stack-machine` (category `pattern-matching`)
 
 A third family in a new category, to keep testing whether solution-first generation generalises and to
