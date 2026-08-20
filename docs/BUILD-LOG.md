@@ -8,6 +8,57 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Sixth family: `trait-impl` (category `traits-generics`) — first uncovered core category
+
+Growing the corpus (roadmap P7, the long pole). The five existing families cover `borrow-lifetimes`,
+`error-handling`, `pattern-matching`, `iterators`, `data-structures`; of [docs/04](04-categories.md)'s
+five **core** categories, only `borrow-lifetimes` (window-op) and `error-handling` were covered. This
+adds **`traits-generics`** — core #2, the clearest uncovered gap.
+
+The distinctive skill is deliberately *not* another fold-shaped problem: the model implements a **trait
+with an associated type** for a provided unit struct, consumed by a **generic driver with a where-bound**.
+The interface is pinned in the skeleton (like `error-handling` pins its enum): the trait `Aggregate {
+type Item; fn keep(&self, &Self::Item)->bool; fn identity(&self)->i64; fn combine(&self, i64,
+Self::Item)->i64; }`, the driver `fn drive<A: Aggregate<Item = i64>>(agg: &A, xs: &[i64]) -> i64`, and
+the struct are all given; the model writes only the `impl … { type Item = i64; … }` block. Getting the
+associated type or a method signature wrong makes the driver's `A: Aggregate<Item = i64>` bound
+unsatisfiable, so the hidden tests fail to build and the answer scores **0.0** — which is exactly the
+"L1 + signature match" oracle emphasis docs/04 assigns this category, enforced structurally rather than
+by a bespoke check.
+
+Seed-selected on two axes — **keep** (Positive / Even / NonNegative / Odd) × **reduce** (Sum / Product /
+Count / SumOfSquares / SumOfAbs) = **20 distinct skills**. Solution-first and correct-by-construction
+(ADR-0003): native `eval`, the emitted `impl`, and the differential's free reference are mirrored; the
+differential fuzzes 3000 random slices (values ∈ -9..=9, len 0..12, so no debug overflow — the tightest
+case is `Product` over eleven `9`s ≈ 3.1e10). `validate-family --seeds 8`, all five gates green on every
+seed:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+spec-diversity: 20 distinct skills
+distinct-skills epoch: served 8 seed(s) covering 8 distinct skills
+```
+
+**The trivial baselines are both constants — and that is deliberate, not lazy.** `const-zero` (returns 0)
+and `const-one` (`identity`→1, keep→false → returns 1). Any *shaped* degenerate (sum-everything, length)
+coincides with exactly one real spec and would pass on that seed, so a fixed shaped baseline can't be
+universally wrong. The two constants are: the canonical worked example is the fixed input `[2, 3, 4, 5]`,
+whose answer is provably never 0 or 1 under any of the 20 combos (a pinned test asserts it, and that every
+keep predicate keeps ≥ 2 of its elements), so both baselines fail on every seed.
+
+**Honest caveat, same phenomenon as `stack-machine`.** The pinned interface dominates the text, so the
+*text* proxies are low: view-distance median 0.299 with 6/28 near-twin pairs, and reference-capacity **1**
+(the trait+driver+impl boilerplate is ~90% of every solution; only three short method bodies vary). That
+is the Q31 story again — text distance is deflated by shared scaffolding and is *not* the diversity
+measure. The authoritative, ungameable number is spec-diversity = **20**, comfortably above any per-epoch
+seed count, and the distinct-skills sampler serves them. Left the low text numbers reported honestly
+rather than seed-varying the prompt harder to inflate a proxy (Q31 warns that lift is illusory).
+
+Registered in `bench_gen::FAMILY_IDS` and the `spec_diversity` pin (== 20) in the same commit. 119
+workspace tests (+11); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-20 · Throughput in `stats` — the second headline number
 
 The project's thesis is two numbers (capability + throughput), but `stats` reported only capability. Folded

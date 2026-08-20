@@ -21,6 +21,7 @@ pub mod error_handling;
 pub mod grid_reduce;
 pub mod seq_transform;
 pub mod stack_machine;
+pub mod traits_generics;
 pub mod window_op;
 
 /// Derive an instance seed from the epoch, task id and index (docs/02):
@@ -168,6 +169,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "stack-machine",
     "seq-transform",
     "grid-reduce",
+    "trait-impl",
 ];
 
 /// Look up a family by id.
@@ -178,6 +180,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "stack-machine" => Some(Box::new(stack_machine::StackMachineFamily)),
         "seq-transform" => Some(Box::new(seq_transform::SeqTransformFamily)),
         "grid-reduce" => Some(Box::new(grid_reduce::GridReduceFamily)),
+        "trait-impl" => Some(Box::new(traits_generics::TraitsGenericsFamily)),
         _ => None,
     }
 }
@@ -252,6 +255,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("seq-transform").unwrap().as_ref(), 4000),
             48
+        );
+        // trait-impl = 4 keep predicates x 5 reductions.
+        assert_eq!(
+            spec_diversity(family("trait-impl").unwrap().as_ref(), 4000),
+            20
         );
     }
 }
