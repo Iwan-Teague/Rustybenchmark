@@ -11,6 +11,8 @@
 //! writes to the workspace. The seam is deliberately narrow — one `run_cargo`
 //! helper — so containment is applied in exactly one place.
 
+pub mod ast;
+
 use bench_core::{
     classify_error_codes, composite_score, BehaviorScore, ConstraintScore, FailureClass, Instance,
     OracleVector, OracleWeights,
@@ -42,6 +44,10 @@ pub struct GradeSpec<'a> {
     pub alloc_test: Option<&'a str>,
     /// Resource limits (harness-owned wall clock, rlimits) for every cargo call.
     pub limits: bench_sandbox::Limits,
+    /// L3 AST constraint: maximum `unsafe` usages allowed. `None` = unchecked.
+    pub max_unsafe: Option<u32>,
+    /// L3 AST constraint: forbidden type/function paths (`RefCell`, `transmute`).
+    pub forbidden_paths: Vec<String>,
 }
 
 /// Grade one model response for one instance.
@@ -169,6 +175,34 @@ pub fn grade(
             _ => constraint
                 .violations
                 .push("alloc: test target did not run".into()),
+        }
+        constraint.recompute();
+    }
+
+    // ---- L3 constraint: AST checks (unsafe, forbidden paths) ----
+    if spec.max_unsafe.is_some() || !spec.forbidden_paths.is_empty() {
+        if let Some(limit) = spec.max_unsafe {
+            if let Some(n) = ast::count_unsafe(&code) {
+                constraint.unsafe_blocks = Some(n);
+                let ok = n <= limit;
+                constraint.unsafe_ok = Some(ok);
+                if !ok {
+                    constraint
+                        .violations
+                        .push(format!("unsafe: {n} usage(s), limit {limit}"));
+                }
+            }
+        }
+        if !spec.forbidden_paths.is_empty() {
+            if let Some(hits) = ast::find_forbidden_paths(&code, &spec.forbidden_paths) {
+                let ok = hits.is_empty();
+                constraint.paths_ok = Some(ok);
+                if !ok {
+                    constraint
+                        .violations
+                        .push(format!("forbidden path(s): {}", hits.join(", ")));
+                }
+            }
         }
         constraint.recompute();
     }

@@ -8,6 +8,48 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P2 — L3 `syn` AST checks: unsafe counting + forbidden paths
+
+**What.** The structural L3 constraints, done on the parsed tree via `syn`, never
+by grepping text (docs/03). A new `bench-oracle::ast` module — also the parsing
+machinery P3 generation reuses — exposes `count_unsafe` (every `unsafe {}` block
+and `unsafe fn`, free or impl method) and `find_forbidden_paths` (any path
+segment matching `RefCell`, `transmute`, … regardless of import style). Tasks
+declare `[constraint] max_unsafe` and `forbidden_paths`; `ConstraintScore` gains
+`unsafe_ok` / `paths_ok` and the raw `unsafe_blocks` count.
+
+**Demonstrated.** `split-mut-window` now sets `max_unsafe = 0` — solving a
+borrow-checker task with raw-pointer `unsafe` sidesteps the very skill it probes.
+An `unsafeptr` answer (correct, zero-alloc, but `unsafe { std::ptr::swap(...) }`):
+
+```
+unsafe_blocks: 1, unsafe_ok: false, violations: ["unsafe: 1 usage(s), limit 0"]
+score 0.694  failure=Constraint
+```
+
+Behaviour is perfect (1.0) and it does not allocate — the unsafe is invisible to
+L1/L2/L3-alloc. Only the AST check sees it. You cannot hide `unsafe` from the
+parse tree.
+
+**A calibration finding, logged not smoothed over.** Adding the unsafe check
+*raised* the clone-everything score from **0.389 to 0.694**. Both `clone`
+(allocates, no unsafe) and `unsafeptr` (no alloc, uses unsafe) now score 0.694 —
+each violates exactly one of the two constraint checks, and the layer is their
+**mean** (docs/03). So mean-aggregation gives a cheating solution half credit for
+the constraint it happened *not* to violate, which **partially undoes the
+constraint-dominant weighting the S6 fix relied on** — the more constraint
+checks a task has, the more a single-constraint violation is diluted. This is a
+real design question: for a category where every constraint expresses the same
+"respect the borrow checker" intent, the layer arguably wants **min** (worst
+violation) or per-check weights, not mean. Filed for P2-proper alongside the
+pass-predicate decision (Q28); it is the same class of question — how strict the
+aggregation should be. The machinery is correct; the aggregation policy is the
+open call.
+
+32 tests across five crates; clippy clean under `-D warnings`; fmt clean.
+
+---
+
 ## 2026-08-19 · P1 — bench-sandbox: wall-clock timeout + rlimits
 
 **What.** Finishes the sandbox's resource controls. Model code that spins,

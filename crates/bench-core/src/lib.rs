@@ -171,7 +171,12 @@ pub struct ConstraintScore {
     pub alloc_ok: Option<bool>,
     pub clippy_clean: Option<bool>,
     pub fmt_ok: Option<bool>,
+    /// Count of `unsafe` usages found by the AST check (informational).
     pub unsafe_blocks: Option<u32>,
+    /// `unsafe` count within the task's limit.
+    pub unsafe_ok: Option<bool>,
+    /// No forbidden type/function path present.
+    pub paths_ok: Option<bool>,
     /// Human-readable violations, e.g. `"alloc: hot path allocated"`.
     pub violations: Vec<String>,
     /// Mean of the boolean checks that ran, in [0, 1]; `None` if none ran.
@@ -180,14 +185,20 @@ pub struct ConstraintScore {
 
 impl ConstraintScore {
     /// Recompute `score` as the mean of the boolean checks present. `unsafe_blocks`
-    /// is recorded but not folded in here — a task that forbids `unsafe` expresses
-    /// that as its own check in a later increment.
+    /// is the raw count and is recorded, not scored; `unsafe_ok` carries the
+    /// verdict.
     pub fn recompute(&mut self) {
         let mut sum = 0.0f32;
         let mut n = 0u32;
-        for b in [self.alloc_ok, self.clippy_clean, self.fmt_ok]
-            .into_iter()
-            .flatten()
+        for b in [
+            self.alloc_ok,
+            self.clippy_clean,
+            self.fmt_ok,
+            self.unsafe_ok,
+            self.paths_ok,
+        ]
+        .into_iter()
+        .flatten()
         {
             sum += if b { 1.0 } else { 0.0 };
             n += 1;

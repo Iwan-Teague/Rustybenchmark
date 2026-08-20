@@ -16,3 +16,9 @@ quality = 0.10
 behavior_test = "behavior"
 differential_test = "differential"
 alloc_test = "alloc"
+
+# borrow-lifetimes: solving with `unsafe` pointer tricks sidesteps the very skill
+# the task probes, so no unsafe is permitted (AST-checked, not grep).
+[constraint]
+max_unsafe = 0
+forbidden_paths = []

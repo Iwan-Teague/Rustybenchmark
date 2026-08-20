@@ -62,6 +62,8 @@ struct TaskManifest {
     weights: Option<Weights>,
     #[serde(default)]
     oracle: Option<OracleCfg>,
+    #[serde(default)]
+    constraint: Option<ConstraintCfg>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +78,13 @@ struct OracleCfg {
     behavior_test: Option<String>,
     differential_test: Option<String>,
     alloc_test: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ConstraintCfg {
+    max_unsafe: Option<u32>,
+    #[serde(default)]
+    forbidden_paths: Vec<String>,
 }
 
 /// One journal line — a subset of docs/12-schemas.md journal.jsonl.
@@ -206,6 +215,7 @@ fn run(
         })
         .unwrap_or_default();
     let ocfg = manifest.oracle.unwrap_or_default();
+    let ccfg = manifest.constraint.unwrap_or_default();
     let limits = bench_sandbox::Limits {
         wall: std::time::Duration::from_secs(wall_timeout_secs),
         // Far CPU backstop: 30x the wall so the wall clock is always the primary
@@ -220,6 +230,8 @@ fn run(
         differential_test: ocfg.differential_test.as_deref(),
         alloc_test: ocfg.alloc_test.as_deref(),
         limits,
+        max_unsafe: ccfg.max_unsafe,
+        forbidden_paths: ccfg.forbidden_paths.clone(),
     };
 
     let containment = match bench_sandbox::available() {

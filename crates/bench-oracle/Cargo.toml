@@ -10,4 +10,5 @@ bench-core = { path = "../bench-core" }
 bench-sandbox = { path = "../bench-sandbox" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+syn = { version = "2", features = ["full", "visit"] }
 thiserror = { workspace = true }
