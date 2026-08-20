@@ -8,6 +8,44 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · First real model — llama-server + Qwen2.5-3B-Instruct-Q4_K_M
+
+**What.** The first non-mock run: `rustybench run` against a live `llama-server`
+(build 10470) serving Qwen2.5-3B-Instruct-Q4_K_M on the M5's Metal GPU, full
+offload, concurrency pinned to 1. The HTTP path, token accounting, and the whole
+oracle stack exercised against a real model.
+
+**Result — the thesis on a real model.** Score **0.922**, `failure_class` Logic.
+The model wrote a genuinely good answer: in-place `slice.reverse()`, **no
+allocation** (L3 constraint 1.0), four of five behaviour tests pass. It fails one
+— and the failure is a real, subtle Rust bug:
+
+```rust
+for i in (0..v.len() - w + 1).step_by(w) { ... }
+//            ^^^^^^^^^^^^^^ usize underflow when v.len() < w
+```
+
+On the empty slice with `w = 3`, `0usize - 3` panics. The oracle located it
+exactly: behaviour 0.8, failing input = `empty_slice`. That is the entire value
+proposition demonstrated end to end — not a pass/fail bit, but "compiles,
+memory-clean, one usize-underflow edge case." No general-purpose benchmark
+produces that shape of result.
+
+**Numbers:** prompt 290 tok, completion 285 tok, gen 5137 ms, grade 1775 ms.
+
+**Throughput is NOT representative and is labelled so.** The ~55 tok/s here was
+measured with 15 Chrome + 8 Safari + VS Code + Electron all compositing through
+the same GPU and sharing unified-memory bandwidth, Bitdefender hooking every
+cargo file write (inflating `grade_ms`), and this agent working alongside.
+Correctness is robust to all of it — the oracle is deterministic — which is the
+verifiable/unverifiable split (docs/10) confirmed in practice: the score is
+trustworthy from a busy machine; the tok/s is not. Calibration-quality
+throughput needs a quiesced host (a P1 concern), not a smoke test.
+
+**Host:** Apple M5, 24 GB unified, macOS 26.5.1, AC power, ~81% memory free.
+
+---
+
 ## 2026-08-19 · P2 (partial) — L3 constraint layer: allocation instrumentation
 
 **What.** The first L3 constraint check, and per-category oracle weights, wired
