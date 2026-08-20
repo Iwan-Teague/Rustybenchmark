@@ -51,6 +51,15 @@ pub const CLUSTER_FLOOR: usize = 8;
 /// Default bootstrap resamples.
 pub const BOOTSTRAP_ITERS: usize = 10_000;
 
+/// Units at the start of each run *segment* excluded from the throughput aggregate
+/// for cache warmth (docs/08). The first unit of a session compiles cold — the
+/// dependency crates and the shared `target/` are unwarmed — while later units
+/// reuse the warm cache, so counting the cold lead unit would understate
+/// steady-state throughput. Conservative (only the coldest lead unit per segment),
+/// and it touches *timing only*: capability scoring still uses every unit. Recorded
+/// via `segment_position` so the exclusion is auditable rather than magic.
+pub const SEGMENT_WARMUP_UNITS: u32 = 1;
+
 fn default_kind() -> String {
     "core".to_string()
 }
@@ -86,6 +95,14 @@ pub struct Record {
     pub index: u32,
     #[serde(default = "default_epoch")]
     pub epoch: String,
+    /// Which run session produced this unit (docs/09). `None` for single-unit `run`
+    /// and journals that predate segments.
+    #[serde(default)]
+    pub segment: Option<u32>,
+    /// 0-based position within the segment; drives the cache-warmth exclusion
+    /// ([`SEGMENT_WARMUP_UNITS`]). `None` = never treated as warmup.
+    #[serde(default)]
+    pub segment_position: Option<u32>,
     #[serde(default)]
     pub cost: Cost,
 }
@@ -145,6 +162,8 @@ impl Record {
             kind: kind.to_string(),
             index,
             epoch: epoch.to_string(),
+            segment: None,
+            segment_position: None,
             cost: Cost::default(),
         }
     }
@@ -892,22 +911,41 @@ pub struct ThroughputReport {
     pub passes_per_hour: f64,
     /// Fraction of wall spent grading rather than generating.
     pub grade_share: f64,
+    /// Timed units dropped from this aggregate as segment cache-warmth
+    /// ([`SEGMENT_WARMUP_UNITS`]); 0 if the journal carries no segment positions.
+    pub warmup_excluded: usize,
 }
 
 /// Fold a journal's per-unit costs into the throughput report. `None` when no unit
 /// carried timing (e.g. synthetic records), so the caller can omit the section rather
 /// than print zeros.
+///
+/// The first [`SEGMENT_WARMUP_UNITS`] of each segment are excluded for cache warmth
+/// (docs/08): a unit is warmup iff it carries a `segment_position` below the
+/// threshold. Units with no position (single `run`, older journals) are never
+/// excluded. If excluding warmup would drop *every* timed unit (e.g. a one-unit
+/// segment), all timed units are kept instead — a warm-biased number beats none.
 pub fn throughput(records: &[Record]) -> Option<ThroughputReport> {
+    let timed = |r: &Record| r.cost.gen_ms != 0 || r.cost.grade_ms != 0;
+    let is_warmup = |r: &Record| r.segment_position.is_some_and(|p| p < SEGMENT_WARMUP_UNITS);
+    // Only exclude warmup if some timed steady-state unit remains to measure.
+    let exclude_warmup = records.iter().any(|r| timed(r) && !is_warmup(r));
+
     let mut gen_ms = 0u64;
     let mut grade_ms = 0u64;
     let mut ctoks = 0u64;
     let mut units = 0usize;
     let mut core_passes = 0usize;
+    let mut warmup_excluded = 0usize;
     for r in records {
-        let c = &r.cost;
-        if c.gen_ms == 0 && c.grade_ms == 0 {
+        if !timed(r) {
             continue; // no timing recorded for this unit
         }
+        if exclude_warmup && is_warmup(r) {
+            warmup_excluded += 1;
+            continue;
+        }
+        let c = &r.cost;
         gen_ms += c.gen_ms;
         grade_ms += c.grade_ms;
         ctoks += c.completion_tokens as u64;
@@ -942,6 +980,7 @@ pub fn throughput(records: &[Record]) -> Option<ThroughputReport> {
         units_per_hour: per_hour(units as f64),
         passes_per_hour: per_hour(core_passes as f64),
         grade_share: if wall_s > 0.0 { grade_s / wall_s } else { 0.0 },
+        warmup_excluded,
     })
 }
 
@@ -1305,6 +1344,41 @@ mod tests {
         assert!((t.passes_per_hour - 480.0).abs() < 1e-3);
         // Synthetic records (no timing) → None.
         assert!(throughput(&[Record::synthetic("c", "f", 0, 1.0, true)]).is_none());
+    }
+
+    #[test]
+    fn throughput_excludes_segment_warmup() {
+        // Units at segment position < SEGMENT_WARMUP_UNITS are dropped from the
+        // timing aggregate (docs/08). One cold lead unit (position 0) followed by
+        // two warm ones (positions 1, 2), all in segment 0.
+        let mk = |pos: u32, gen_ms: u64, grade_ms: u64| {
+            let line = format!(
+                r#"{{"task_id":"f/{pos:016x}","category":"c","kind":"core","index":{pos},"epoch":"e","segment":0,"segment_position":{pos},"cost":{{"prompt_tokens":100,"completion_tokens":100,"gen_ms":{gen_ms},"grade_ms":{grade_ms}}},"oracle":{{"apply_ok":true,"compile_ok":true,"error_codes":[],"warn_count":0,"behavior":{{"unit":null,"property":null,"differential":null,"score":1.0}},"constraint":{{"alloc_ok":null,"clippy_clean":null,"fmt_ok":null,"unsafe_blocks":null,"unsafe_ok":null,"paths_ok":null,"violations":[],"score":null}},"score":1.0,"failure_class":"none","flags":[]}}}}"#,
+            );
+            parse_journal(&line).unwrap().pop().unwrap()
+        };
+        // Cold lead unit is slow (1 tok/s); the two warm units are fast (100 tok/s).
+        let recs = vec![
+            mk(0, 100_000, 0), // warmup: excluded
+            mk(1, 1000, 0),    // 100 tok/s
+            mk(2, 1000, 0),    // 100 tok/s
+        ];
+        let t = throughput(&recs).unwrap();
+        assert_eq!(t.units, 2, "the cold lead unit is excluded");
+        assert_eq!(t.warmup_excluded, 1);
+        // Steady-state decode is the warm rate, not dragged down by the cold unit.
+        assert!(
+            (t.decode_tok_per_s - 100.0).abs() < 1e-6,
+            "got {}",
+            t.decode_tok_per_s
+        );
+
+        // A one-unit segment is all warmup; rather than report nothing, fall back to
+        // using it (a warm-biased number beats None).
+        let solo = vec![mk(0, 2000, 500)];
+        let ts = throughput(&solo).unwrap();
+        assert_eq!(ts.units, 1);
+        assert_eq!(ts.warmup_excluded, 0);
     }
 
     #[test]

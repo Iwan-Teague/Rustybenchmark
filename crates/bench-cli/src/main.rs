@@ -371,6 +371,8 @@ fn run(
         "core",
         0,
         0,
+        None,
+        None,
     )?;
     append_journal(out, &line)?;
 
@@ -409,6 +411,8 @@ fn grade_and_line(
     kind: &str,
     seed: u64,
     index: u32,
+    segment: Option<u32>,
+    segment_position: Option<u32>,
 ) -> Result<JournalLine, Box<dyn std::error::Error>> {
     let containment = match bench_sandbox::available() {
         bench_sandbox::Containment::Seatbelt => "seatbelt",
@@ -450,6 +454,8 @@ fn grade_and_line(
         index,
         epoch: epoch.to_string(),
         kind: kind.to_string(),
+        segment,
+        segment_position,
         model: ModelInfo {
             name: model_name.to_string(),
             base_url: base_url.to_string(),
@@ -517,13 +523,19 @@ fn run_suite(
     if !containment {
         eprintln!("  ! warning: no sandbox on this platform — model code runs uncontained");
     }
+    // A segment is this run session (docs/09). A resume starts a fresh segment, so
+    // its first units are cold-cache and excluded from throughput (docs/08). The
+    // index is one past the highest already journalled for this epoch.
+    let segment = next_segment(out, epoch)?;
+    println!("epoch {epoch}: segment {segment} (this session)");
+
     let mut ran = 0usize;
-    for u in &todo {
+    for (pos, u) in todo.iter().enumerate() {
         let g =
             bench_gen::family(&u.family).ok_or_else(|| format!("unknown family {}", u.family))?;
         let task = task_from_generated(&g.generate(u.seed));
         println!(
-            "→ {} {} idx={} (seed {:016x})",
+            "→ {} {} idx={} (seed {:016x})  [seg {segment} pos {pos}]",
             u.family,
             u.kind.as_str(),
             u.index,
@@ -539,6 +551,8 @@ fn run_suite(
             u.kind.as_str(),
             u.seed,
             u.index,
+            Some(segment),
+            Some(pos as u32),
         )?;
         println!(
             "  score {:.3} pass={}",
@@ -549,10 +563,43 @@ fn run_suite(
         ran += 1;
     }
     println!(
-        "epoch {epoch}: ran {ran} unit(s); journal → {}",
+        "epoch {epoch}: segment {segment} ran {ran} unit(s); journal → {}",
         out.display()
     );
     Ok(())
+}
+
+/// The next segment index for `epoch`: one past the highest already recorded, or 0
+/// if this is the epoch's first session. Units carry `segment` so a resumed run
+/// (a new session, cold caches) is distinguishable from the original (docs/09).
+fn next_segment(out: &Path, epoch: &str) -> Result<u32, Box<dyn std::error::Error>> {
+    #[derive(Deserialize)]
+    struct SegLine {
+        #[serde(default)]
+        epoch: String,
+        #[serde(default)]
+        segment: Option<u32>,
+    }
+    let text = match std::fs::read_to_string(out) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    let mut max_seg: Option<u32> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let s: SegLine = serde_json::from_str(line)?;
+        if s.epoch != epoch {
+            continue;
+        }
+        if let Some(seg) = s.segment {
+            max_seg = Some(max_seg.map_or(seg, |m| m.max(seg)));
+        }
+    }
+    Ok(max_seg.map_or(0, |m| m + 1))
 }
 
 /// Read the resume set: the `family|kind|index` keys already recorded for `epoch`.
@@ -817,7 +864,15 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
     match &r.throughput {
         Some(t) => {
-            println!("throughput (over {} executed units, core+probe):", t.units);
+            let warm = if t.warmup_excluded > 0 {
+                format!(", {} segment-warmup unit(s) excluded", t.warmup_excluded)
+            } else {
+                String::new()
+            };
+            println!(
+                "throughput (over {} executed units, core+probe{warm}):",
+                t.units
+            );
             println!(
                 "  decode {:.1} tok/s  |  {:.1} s/unit ({:.1}s gen + {:.1}s grade, grade {:.0}% of wall)",
                 t.decode_tok_per_s,
@@ -922,6 +977,17 @@ struct JournalLine {
     epoch: String,
     /// `"core"` or `"probe"` (ADR-0009).
     kind: String,
+    /// Which run *session* produced this unit. A segment is one `run-suite`
+    /// invocation over an epoch; a resume starts a new segment. `None` for the
+    /// single-unit `run` (no segment structure). docs/08, docs/09.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    segment: Option<u32>,
+    /// 0-based position of this unit within its segment. The first few units of a
+    /// segment run against cold caches, so `bench-stats` excludes them from the
+    /// throughput aggregate (docs/08) — recorded so that exclusion is auditable
+    /// rather than magic. `None` for the single-unit `run`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    segment_position: Option<u32>,
     model: ModelInfo,
     sandbox: String,
     oracle: OracleVector,

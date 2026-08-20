@@ -8,6 +8,40 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Run protocol depth — `segment_position` + the cache-warmth throughput exclusion (P4)
+
+Closed the docs/08 refinement flagged as future work in the throughput entry below: *"Exclude the first
+N units of each segment from timing aggregates (cache warmth); record `segment_position` on every unit so
+this is auditable rather than magic."*
+
+- **Segments recorded.** A *segment* is one `run-suite` session over an epoch (docs/09); a resume starts a
+  new one, and its lead units compile against cold caches. `run-suite` now stamps every journalled unit
+  with `segment` (one past the highest already recorded for the epoch — computed by `next_segment`) and
+  `segment_position` (0-based within the session). The single-unit `run` writes neither (`None` — no
+  segment structure), and both fields `skip_serializing_if` empty so a `run` line is byte-unchanged.
+- **Cache-warmth exclusion.** `bench_stats::throughput` now drops the first `SEGMENT_WARMUP_UNITS` (= 1,
+  a named, tunable constant) of each segment from the timing aggregate: a unit is warmup iff its
+  `segment_position` is below the threshold. Units with no position (single `run`, older journals) are
+  never excluded, and if the exclusion would empty the timed set (a one-unit segment) it falls back to
+  using all — a warm-biased number beats none. It touches **timing only**; capability/pass scoring still
+  uses every unit. The report carries `warmup_excluded` and `stats` prints it, so the exclusion is
+  auditable rather than magic.
+
+Verified three ways. Backward-compat: `stats` on the pre-segment `runs/clean.jsonl` is unchanged
+(12 units, 53.5 tok/s, 945 units/h — no positions, nothing excluded). A synthetic segment with one cold
+lead unit (1 tok/s) followed by two warm ones (100 tok/s) reports **"2 executed units … 1 segment-warmup
+unit excluded", decode 100.0 tok/s** — the cold unit no longer drags the steady-state number down. A unit
+test pins both the exclusion and the one-unit-segment fallback.
+
+Honest note: as the throughput entry below already measured, cache warmth is a *smaller* effect than the
+compile-success split (a compiling/passing unit runs the 3000-iter differential ≈1 s; a compile-fail
+short-circuits ≈0.1 s). So this exclusion matters most for cross-segment/resumed runs; within one warm
+session it moves the number little. It is the right, auditable mechanism regardless. 138 workspace tests
+(+1); clippy `-D warnings` and `cargo fmt --check` clean. Still future work: `status`/`resume` readouts
+(next).
+
+---
+
 ## 2026-08-20 · Ninth family: `str-transform` (category `string-processing`)
 
 More corpus breadth (P7): a text-processing shape. The model implements `fn f(s: &str) -> String` as a
