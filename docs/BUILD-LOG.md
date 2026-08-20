@@ -8,6 +8,35 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · bench-invariants — the doc-arithmetic CI gate (round 6's ask)
+
+**What.** Round 6 asked for "one script that recomputes every published table
+from its stated formulae and fails CI on a hand-edited cell", because the same
+defect class recurred across three rounds: R1-S1 (statistics tables
+arithmetically wrong), round 5's arithmetic block, and R6-S1/R6-S7 (`standard`
+published two different CIs for one quantity). This is that gate.
+
+`bench-invariants` holds the canonical parameters (corpus 5×40 + 6×12, ICC 0.3,
+per-suite seeds, the timing split) and the formulae (`design_effect`, `ci_pct`,
+the stratified `overall_ci`, `F/ICC` ceiling) in **one place**. Four tests parse
+the actual markdown tables in `07-statistics.md` and `04-categories.md` and
+assert every cell follows from the math: suite families/seeds/units, pooled
+eff N, overall CI, per-category CIs, and wall-clock hours (unit-aware — smoke is
+in minutes); the 272 = 248 + 24 corpus split; the 44.5-hour headline (with a
+guard that a stale "39 hour" cannot reappear); and the precision ceiling.
+
+**Proven both directions.** Passes clean on the current docs. Then I corrupted
+`deep`'s overall CI to **±4.1%** — which is *exactly* the stale pre-R6 value —
+and the gate failed with `deep overall CI: doc says 4.1, formula gives 4.8542`.
+It catches the precise drift round 6 found, and it runs under the normal
+`cargo test`, so a hand-edited cell now breaks CI.
+
+The canonical model is now the source of truth: when Phase 3.5 measures ICC, it
+changes in `bench-invariants` and every doc table must move with it or the build
+fails. 36 tests across six crates; clippy clean under `-D warnings`; fmt clean.
+
+---
+
 ## 2026-08-19 · P2 — L3 `syn` AST checks: unsafe counting + forbidden paths
 
 **What.** The structural L3 constraints, done on the parsed tree via `syn`, never

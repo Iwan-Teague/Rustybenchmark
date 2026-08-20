@@ -101,6 +101,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bench-invariants"
+version = "0.0.1"
+
+[[package]]
 name = "bench-model"
 version = "0.0.1"
 dependencies = [
