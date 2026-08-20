@@ -227,7 +227,8 @@ mod tests {
         // The honest, ungameable task-diversity ceiling (Q31): distinct structural
         // specs, constants excluded. window-op = 6 ops x 2 strides; error-handling
         // = 5 combines x 6 rule-types; stack-machine = 5 combines x 4 maps x 2
-        // reorders. Pinned so narrowing a surface fails loudly.
+        // reorders; seq-transform = 4 filters x 4 maps x 3 terminals. Pinned so
+        // narrowing a surface fails loudly.
         assert_eq!(
             spec_diversity(family("window-op").unwrap().as_ref(), 4000),
             12
