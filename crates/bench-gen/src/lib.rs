@@ -5,12 +5,15 @@
 //! the model completes — all built from the same seed, **solution-first**, so
 //! the oracle is correct by construction (docs/02-task-format.md, ADR-0003).
 //!
-//! Scope of this first P3 increment: seed derivation, canary minting, the
-//! `Generator` trait, and one parametric family (`window-op`) where the *operation
-//! itself* varies by seed, not just identifiers — so seeds resist memorisation
-//! rather than merely renaming. `validate-family`'s core gates
-//! (reference-passes-its-own-oracle, skeleton-fails, determinism) are exercised
-//! by `rustybench validate-family` in the CLI.
+//! This crate provides seed derivation, canary minting, the `Generator` trait, the
+//! distance-aware [`epoch`] sampler, and the family registry ([`FAMILY_IDS`] /
+//! [`family`]). Each family draws its *structural* choices from the seed — the
+//! operation, not just identifiers — so seeds resist memorisation rather than
+//! merely renaming; [`spec_diversity`] counts those distinct skills (Q31).
+//! `validate-family` in the CLI runs the compile-dependent construction gates
+//! (reference-passes-its-own-oracle, skeleton-fails, baselines-caught); the pure
+//! invariants (determinism, canary, category, spec-signature, the diversity floor)
+//! are guarded generically over the whole registry in this crate's tests.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -243,6 +246,58 @@ mod tests {
                 family(id).is_some(),
                 "FAMILY_IDS entry {id} does not resolve"
             );
+        }
+    }
+
+    /// The minimum spec-diversity a family must clear to ship — docs/17's
+    /// "comfortably above [a per-epoch seed count of] 8". Provisional, like
+    /// `bench_stats::CLUSTER_FLOOR`; the real floor is fixed once Phase 4 sets the
+    /// per-epoch seed count (Q30/Q31). Every current family clears it with headroom
+    /// (the smallest is 12).
+    const MIN_SPEC_DIVERSITY: usize = 8;
+
+    #[test]
+    fn every_family_meets_the_pure_construction_invariants() {
+        // A generic drift-guard over the whole registry: the invariants that need no
+        // toolchain (the compile/differential gates stay in `validate-family`). A new
+        // family that forgets determinism, its canary, a category, a spec-signature,
+        // or enough diversity fails here in `cargo test`, not only in the manual CLI.
+        for id in FAMILY_IDS {
+            let g = family(id).unwrap();
+            assert!(!g.category().is_empty(), "{id}: empty category");
+            assert!(
+                spec_diversity(g.as_ref(), 4000) >= MIN_SPEC_DIVERSITY,
+                "{id}: spec-diversity below the floor of {MIN_SPEC_DIVERSITY}"
+            );
+            for seed in [0u64, 1, 7, 42, 1000] {
+                let a = g.generate(seed);
+                let b = g.generate(seed);
+                assert_eq!(
+                    a.prompt, b.prompt,
+                    "{id} seed {seed}: prompt not deterministic"
+                );
+                assert_eq!(
+                    a.files, b.files,
+                    "{id} seed {seed}: files not deterministic"
+                );
+                assert_eq!(
+                    a.hidden, b.hidden,
+                    "{id} seed {seed}: hidden not deterministic"
+                );
+                assert!(
+                    a.prompt.contains(&a.canary),
+                    "{id} seed {seed}: prompt is missing its canary"
+                );
+                assert!(
+                    !g.spec_signature(seed).is_empty(),
+                    "{id} seed {seed}: empty spec_signature"
+                );
+                assert_eq!(
+                    a.category,
+                    g.category(),
+                    "{id} seed {seed}: instance category disagrees with the family"
+                );
+            }
         }
     }
 

@@ -8,6 +8,31 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Generic construction-invariant drift-guard over the whole registry
+
+With twelve families and more coming, added a single `cargo test` that loops over `FAMILY_IDS` and asserts
+the **pure** construction invariants for every family — the ones that need no toolchain, so they run in
+milliseconds rather than in the slow `validate-family` compile path:
+
+- **determinism** — `generate(seed)` is byte-identical on a re-run (prompt, files, hidden);
+- **canary** — the prompt carries its `mint_canary` string;
+- **non-empty category** and **non-empty `spec_signature`** per seed, and the instance's `category`
+  matches the family's;
+- **spec-diversity ≥ 8** — docs/17's "comfortably above a per-epoch seed count of 8", now a named
+  `MIN_SPEC_DIVERSITY` floor enforced generically (provisional, like `bench_stats::CLUSTER_FLOOR`; the real
+  value is fixed once Phase 4 sets the per-epoch count). Every current family clears it with headroom
+  (smallest is 12).
+
+Until now these lived only in each family's own hand-written tests and in the manual CLI gate, so a new
+family that simply *forgot* to add a canary or determinism test would pass CI. Now the registry itself is
+the checklist: a family that skips any invariant fails `cargo test` the moment it lands in `FAMILY_IDS`.
+The compile/differential gates (reference = 1.000, skeleton fails, baselines caught) stay in
+`validate-family` — they need the sandboxed toolchain and are too slow for every `cargo test`. Also
+refreshed the stale crate-level module doc (it still described "this first P3 increment ... one parametric
+family"). 158 workspace tests (+1); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · README refreshed + corpus snapshot
 
 Refreshed the README status block, which had drifted to "three families / 71 tests" and listed
