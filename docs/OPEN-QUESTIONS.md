@@ -82,8 +82,8 @@ is small. A family whose fixed scaffolding is large relative to its variable sur
 seeding. The `validate-family` gate already detects the problem in CI; which prevention lever the
 corpus adopts (a per-category floor vs. a mandate to enlarge the variable surface) is the remaining
 open part, tracked as **Q30**. The operative measure there turned out to be not the near-twin *count*
-but the *distinct-at-floor capacity* (window-op 8, error-handling 3) — pairwise-mutual distance is a
-far stronger constraint than the median, and it is the real ceiling.
+but the *distinct-at-floor capacity* (window-op 8; error-handling was 3, since widened to ~326) —
+pairwise-mutual distance is a far stronger constraint than the median, and it is the real ceiling.
 
 ---
 
@@ -474,13 +474,30 @@ most pairwise-≥0.25 instances a family can actually serve — is:
 Pairwise-mutual distance is a far stronger constraint than the median, so capacity is *much* lower than
 either headline number implies: a family whose median looks healthy can seat only a handful of
 genuinely distinct tasks. This reframes the decision above — capacity is a hard ceiling on how many
-memorisation-resistant epochs a family can sustain before it must repeat an instance, so **for
-`error-handling` (capacity 3) lever 2 is effectively forced**: no per-category floor rescues a family
-that cannot supply enough distinct instances to outlast repeated epochs. `window-op`'s 8 is workable
-but still tight. Every family authored in Phase 3 must report a capacity comfortably above the intended
-per-epoch seed count, or be enlarged until it does.
+memorisation-resistant epochs a family can sustain before it must repeat an instance. `window-op`'s 8 is
+workable but tight; `error-handling`'s 3 is unusable, so **lever 2 was applied to it** (below). Every
+family authored in Phase 3 must report a capacity comfortably above the intended per-epoch seed count,
+or be enlarged until it does.
 
-Decide before authoring beyond the two exemplar families. The gate now both *detects* the problem in CI
-and *prevents* it at serve time (`validate-family` reports median/near-twins **and** the epoch sampler's
-capacity; the sampler refuses to serve a twin, returning `Exhausted` instead); this question is which of
-the two prevention strategies the corpus standardises on.
+**Lever 2, applied and measured ([BUILD-LOG](BUILD-LOG.md) 2026-08-20).** `error-handling`'s variable
+surface was widened — combine operations 3 → 5, validation rules 3 → 6 (12 rule-instances counting
+bounds), and the worked examples in the prompt/skeleton are now seed-varied. Result:
+
+| `error-handling` | median | near-twin pairs | distinct-at-floor capacity |
+|---|---|---|---|
+| before | 0.263 | 18/45 | 3 |
+| after | **0.438** | **0/28** | **~326** |
+
+All five construction gates still pass (reference still scores 1.000 — the enlargement kept it
+correct-by-construction). One honest caveat: the ~326 is *view*-capacity, and part of the lift is the
+seed-varied example text, which the shingle metric rewards. That variation legitimately freshens each
+prompt against exact-text memorisation, but it is not skill diversity — the genuine distinct-*logic*
+surface is the 5 × 12 = 60 combine/rule combinations. Both numbers (60 skills, ~326 views) sit
+comfortably above any per-epoch seed count, which is the bar; the lift is real, not purely metric-gaming,
+since same-logic pairs are still often rejected (acceptance ran ~22%, not ~100%).
+
+This is one worked instance of lever 2, not a decision that lever 2 is the standard. The global choice —
+per-category floor vs. mandated surface width — is still open. Decide before authoring beyond the
+exemplar families. The gate now both *detects* the problem in CI and *prevents* it at serve time
+(`validate-family` reports median/near-twins **and** the epoch sampler's capacity; the sampler refuses
+to serve a twin, returning `Exhausted` instead).

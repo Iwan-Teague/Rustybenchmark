@@ -10,6 +10,14 @@
 //! The constraint is error-handling-specific and reuses the AST forbidden-path
 //! check (now matching method calls): no `.unwrap()` / `.expect()` — you must
 //! propagate errors, not panic.
+//!
+//! **Variable surface.** The family's `sample` draws over 5 combine operations ×
+//! 6 validation rules (with varied bounds), and the worked examples shown in the
+//! prompt and skeleton are themselves seed-varied. This width is deliberate: the
+//! epoch sampler measures a family's *distinct-at-floor capacity* (docs/02, Q30),
+//! and a narrow error-handling surface bottomed out at 3 — below any usable
+//! per-epoch seed count. The wider surface here raises that capacity; the number
+//! is pinned as a regression test in `epoch.rs`.
 
 use crate::{mint_canary, GeneratedTask, Generator, Rng};
 use std::collections::BTreeMap;
@@ -20,6 +28,8 @@ enum Combine {
     Sum,
     Product,
     SumAbs,
+    Count,
+    SumSquares,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +37,9 @@ enum Rule {
     NonNegative,
     AtMost(i64),
     NonZero,
+    AtLeast(i64),
+    InRange(i64, i64),
+    Even,
 }
 
 struct Spec {
@@ -46,15 +59,23 @@ const NAMES: &[&str] = &[
 
 fn sample(seed: u64) -> Spec {
     let mut rng = Rng::new(seed);
-    let combine = match rng.below(3) {
+    let combine = match rng.below(5) {
         0 => Combine::Sum,
         1 => Combine::Product,
-        _ => Combine::SumAbs,
+        2 => Combine::SumAbs,
+        3 => Combine::Count,
+        _ => Combine::SumSquares,
     };
-    let rule = match rng.below(3) {
+    let rule = match rng.below(6) {
         0 => Rule::NonNegative,
         1 => Rule::AtMost([10, 50, 100][rng.below(3) as usize]),
-        _ => Rule::NonZero,
+        2 => Rule::NonZero,
+        3 => Rule::AtLeast([-5, 0, 5][rng.below(3) as usize]),
+        4 => {
+            let (lo, hi) = [(0, 50), (-10, 10), (1, 100)][rng.below(3) as usize];
+            Rule::InRange(lo, hi)
+        }
+        _ => Rule::Even,
     };
     let fn_name = NAMES[rng.below(NAMES.len() as u64) as usize];
     Spec {
@@ -64,10 +85,20 @@ fn sample(seed: u64) -> Spec {
     }
 }
 
-fn init(c: &Combine) -> i64 {
+/// Native identity element for a combine.
+fn init_val(c: &Combine) -> i64 {
     match c {
-        Combine::Sum | Combine::SumAbs => 0,
+        Combine::Sum | Combine::SumAbs | Combine::Count | Combine::SumSquares => 0,
         Combine::Product => 1,
+    }
+}
+
+/// The identity element as emitted source (all are plain literals — no `i64::MIN`
+/// landmine, which is why `Min`/`Max` are intentionally not in the surface).
+fn init_expr(c: &Combine) -> &'static str {
+    match c {
+        Combine::Product => "1",
+        _ => "0",
     }
 }
 
@@ -77,6 +108,8 @@ fn step(c: &Combine, acc: i64, n: i64) -> i64 {
         Combine::Sum => acc + n,
         Combine::Product => acc * n,
         Combine::SumAbs => acc + n.abs(),
+        Combine::Count => acc + 1,
+        Combine::SumSquares => acc + n * n,
     }
 }
 
@@ -85,6 +118,35 @@ fn passes(rule: &Rule, n: i64) -> bool {
         Rule::NonNegative => n >= 0,
         Rule::AtMost(b) => n <= *b,
         Rule::NonZero => n != 0,
+        Rule::AtLeast(b) => n >= *b,
+        Rule::InRange(lo, hi) => n >= *lo && n <= *hi,
+        Rule::Even => n % 2 == 0,
+    }
+}
+
+/// A value guaranteed to pass `rule` — used to build a clean first element in the
+/// rule-failure worked example.
+fn pass_value(rule: &Rule) -> i64 {
+    match rule {
+        Rule::NonNegative => 3,
+        Rule::AtMost(_) => 3,
+        Rule::NonZero => 3,
+        Rule::AtLeast(b) => *b,
+        Rule::InRange(lo, _) => *lo,
+        Rule::Even => 4,
+    }
+}
+
+/// A value guaranteed to fail `rule` — used to construct a deterministic
+/// rule-failure worked example.
+fn violating_value(rule: &Rule) -> i64 {
+    match rule {
+        Rule::NonNegative => -1,
+        Rule::AtMost(b) => *b + 1,
+        Rule::NonZero => 0,
+        Rule::AtLeast(b) => *b - 1,
+        Rule::InRange(_, hi) => *hi + 1,
+        Rule::Even => 1,
     }
 }
 
@@ -92,7 +154,7 @@ fn passes(rule: &Rule, n: i64) -> bool {
 /// `Ok` values are compared as `i64`; errors as a tag string, matching how the
 /// emitted `ParseError` derives `PartialEq`.
 fn eval(spec: &Spec, items: &[&str]) -> Result<i64, String> {
-    let mut acc = init(&spec.combine);
+    let mut acc = init_val(&spec.combine);
     for it in items {
         let n: i64 = it.parse().map_err(|_| format!("NotANumber({it})"))?;
         if !passes(&spec.rule, n) {
@@ -103,11 +165,18 @@ fn eval(spec: &Spec, items: &[&str]) -> Result<i64, String> {
     Ok(acc)
 }
 
+fn eval_owned(spec: &Spec, items: &[String]) -> Result<i64, String> {
+    let refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+    eval(spec, &refs)
+}
+
 fn acc_expr(c: &Combine) -> &'static str {
     match c {
         Combine::Sum => "acc + n",
         Combine::Product => "acc * n",
         Combine::SumAbs => "acc + n.abs()",
+        Combine::Count => "acc + 1",
+        Combine::SumSquares => "acc + n * n",
     }
 }
 
@@ -116,6 +185,9 @@ fn rule_cond(rule: &Rule) -> String {
         Rule::NonNegative => "n >= 0".to_string(),
         Rule::AtMost(b) => format!("n <= {b}"),
         Rule::NonZero => "n != 0".to_string(),
+        Rule::AtLeast(b) => format!("n >= {b}"),
+        Rule::InRange(lo, hi) => format!("n >= {lo} && n <= {hi}"),
+        Rule::Even => "n % 2 == 0".to_string(),
     }
 }
 
@@ -124,6 +196,8 @@ fn combine_prose(c: &Combine) -> &'static str {
         Combine::Sum => "their sum",
         Combine::Product => "their product",
         Combine::SumAbs => "the sum of their absolute values",
+        Combine::Count => "the count of items",
+        Combine::SumSquares => "the sum of their squares",
     }
 }
 
@@ -132,6 +206,9 @@ fn rule_prose(rule: &Rule) -> String {
         Rule::NonNegative => "be non-negative (>= 0)".to_string(),
         Rule::AtMost(b) => format!("be at most {b}"),
         Rule::NonZero => "be non-zero".to_string(),
+        Rule::AtLeast(b) => format!("be at least {b}"),
+        Rule::InRange(lo, hi) => format!("be in the range {lo}..={hi} inclusive"),
+        Rule::Even => "be even".to_string(),
     }
 }
 
@@ -157,14 +234,14 @@ fn reference_src(spec: &Spec) -> String {
          }}\n",
         enum_src = ENUM_SRC,
         name = spec.fn_name,
-        init = init(&spec.combine),
+        init = init_expr(&spec.combine),
         cond = rule_cond(&spec.rule),
         acc = acc_expr(&spec.combine),
     )
 }
 
-fn skeleton_src(spec: &Spec) -> String {
-    let examples = worked_examples_prose(spec);
+fn skeleton_src(spec: &Spec, seed: u64) -> String {
+    let examples = worked_examples_prose(spec, seed);
     format!(
         "//! Implement `{name}` below.\n\
          //!\n\
@@ -183,23 +260,46 @@ fn skeleton_src(spec: &Spec) -> String {
     )
 }
 
-/// (label, items, expected) worked examples, computed natively.
-fn worked_examples(spec: &Spec) -> Vec<(Vec<&'static str>, Result<i64, String>)> {
-    let inputs: Vec<Vec<&'static str>> = vec![
-        vec!["1", "2", "3"],
-        vec!["4", "5"],
-        vec!["7", "oops", "9"], // parse failure
-        vec![],
+/// Seed-varied worked examples: `(items, expected)`, expected computed natively so
+/// each is correct by construction. The set always includes two varied numeric
+/// cases, a constructed rule-failure case, a parse-failure case and the empty
+/// case. Seed-varying this block is the family's biggest per-instance textual
+/// lever (it appears in both the prompt and the skeleton doc), which is what lifts
+/// the distinct-at-floor capacity (Q30).
+fn worked_examples(spec: &Spec, seed: u64) -> Vec<(Vec<String>, Result<i64, String>)> {
+    let mut rng = Rng::new(seed ^ 0x51ED_C0DE);
+    let mut out: Vec<(Vec<String>, Result<i64, String>)> = Vec::new();
+
+    for _ in 0..2 {
+        let len = 2 + rng.below(3) as usize; // 2..=4 items
+        let items: Vec<String> = (0..len)
+            .map(|_| (rng.below(60) as i64 - 10).to_string()) // -10..=49
+            .collect();
+        let res = eval_owned(spec, &items);
+        out.push((items, res));
+    }
+
+    // Deterministic rule-failure illustration: a passing value, then a violator.
+    let rule_fail = vec![
+        pass_value(&spec.rule).to_string(),
+        violating_value(&spec.rule).to_string(),
     ];
-    inputs
-        .into_iter()
-        .map(|items| (items.clone(), eval(spec, &items)))
-        .collect()
+    let rf_res = eval_owned(spec, &rule_fail);
+    out.push((rule_fail, rf_res));
+
+    // Parse-failure illustration.
+    let parse_fail = vec!["8".to_string(), "nope".to_string(), "2".to_string()];
+    let pf_res = eval_owned(spec, &parse_fail);
+    out.push((parse_fail, pf_res));
+
+    // Empty input.
+    out.push((Vec::new(), eval_owned(spec, &[])));
+    out
 }
 
-fn worked_examples_prose(spec: &Spec) -> String {
+fn worked_examples_prose(spec: &Spec, seed: u64) -> String {
     let mut s = String::new();
-    for (items, res) in worked_examples(spec) {
+    for (items, res) in worked_examples(spec, seed) {
         let r = match res {
             Ok(v) => format!("Ok({v})"),
             Err(e) => format!("Err(ParseError::{e})"),
@@ -209,8 +309,8 @@ fn worked_examples_prose(spec: &Spec) -> String {
     s
 }
 
-fn prompt(spec: &Spec, canary: &str) -> String {
-    let examples = worked_examples_prose(spec);
+fn prompt(spec: &Spec, seed: u64, canary: &str) -> String {
+    let examples = worked_examples_prose(spec, seed);
     format!(
         "Implement the function `{name}` in `src/lib.rs`. The `ParseError` enum is \
          already provided; keep it.\n\
@@ -236,7 +336,7 @@ fn prompt(spec: &Spec, canary: &str) -> String {
         name = spec.fn_name,
         rule = rule_prose(&spec.rule),
         combine = combine_prose(&spec.combine),
-        init = init(&spec.combine),
+        init = init_val(&spec.combine),
         examples = examples,
     )
 }
@@ -276,9 +376,9 @@ fn render_expected(res: &Result<i64, String>) -> String {
     }
 }
 
-fn behavior_test_src(spec: &Spec) -> String {
+fn behavior_test_src(spec: &Spec, seed: u64) -> String {
     let mut body = format!("use task::{{ParseError, {}}};\n\n", spec.fn_name);
-    for (i, (items, res)) in worked_examples(spec).iter().enumerate() {
+    for (i, (items, res)) in worked_examples(spec, seed).iter().enumerate() {
         let items_lit = format!("{items:?}");
         body.push_str(&format!(
             "#[test]\nfn ex{i}() {{\n\
@@ -347,13 +447,14 @@ fn unwrap_version(spec: &Spec) -> String {
          \x20   let mut acc: i64 = {init};\n\
          \x20   for item in items {{\n\
          \x20       let n: i64 = item.parse().unwrap();\n\
+         \x20       let _ = n;\n\
          \x20       acc = {acc};\n\
          \x20   }}\n\
          \x20   Ok(acc)\n\
          }}\n",
         enum_src = ENUM_SRC,
         name = spec.fn_name,
-        init = init(&spec.combine),
+        init = init_expr(&spec.combine),
         acc = acc_expr(&spec.combine),
     )
 }
@@ -374,10 +475,13 @@ impl Generator for ErrorHandlingFamily {
 
         let mut files = BTreeMap::new();
         files.insert(PathBuf::from("Cargo.toml"), cargo_toml());
-        files.insert(PathBuf::from("src/lib.rs"), skeleton_src(&spec));
+        files.insert(PathBuf::from("src/lib.rs"), skeleton_src(&spec, seed));
 
         let mut hidden = BTreeMap::new();
-        hidden.insert(PathBuf::from("tests/behavior.rs"), behavior_test_src(&spec));
+        hidden.insert(
+            PathBuf::from("tests/behavior.rs"),
+            behavior_test_src(&spec, seed),
+        );
         hidden.insert(
             PathBuf::from("tests/differential.rs"),
             differential_test_src(&spec),
@@ -386,7 +490,7 @@ impl Generator for ErrorHandlingFamily {
         GeneratedTask {
             id: format!("error-handling/{seed:016x}"),
             category: self.category().to_string(),
-            prompt: prompt(&spec, &canary),
+            prompt: prompt(&spec, seed, &canary),
             canary,
             answer_path: "src/lib.rs".to_string(),
             files,
@@ -406,7 +510,7 @@ impl Generator for ErrorHandlingFamily {
         reference_src(&sample(seed))
     }
     fn skeleton_code(&self, seed: u64) -> String {
-        skeleton_src(&sample(seed))
+        skeleton_src(&sample(seed), seed)
     }
     fn trivial_baselines(&self, seed: u64) -> Vec<(String, String)> {
         let spec = sample(seed);
@@ -431,13 +535,13 @@ mod tests {
     #[test]
     fn seeds_vary_combine_and_rule() {
         let mut variants = std::collections::HashSet::new();
-        for seed in 0..80u64 {
+        for seed in 0..120u64 {
             let s = sample(seed);
             variants.insert(format!("{:?}/{:?}", s.combine, s.rule));
         }
         assert!(
-            variants.len() >= 8,
-            "expected variety, got {}",
+            variants.len() >= 16,
+            "expected wide variety, got {}",
             variants.len()
         );
     }
@@ -453,6 +557,49 @@ mod tests {
         assert_eq!(eval(&spec, &["1", "-2"]), Err("FailedRule(-2)".to_string()));
         assert_eq!(eval(&spec, &["x"]), Err("NotANumber(x)".to_string()));
         assert_eq!(eval(&spec, &[]), Ok(0));
+    }
+
+    #[test]
+    fn new_combines_and_rules_eval_correctly() {
+        let count_even = Spec {
+            combine: Combine::Count,
+            rule: Rule::Even,
+            fn_name: "f",
+        };
+        assert_eq!(eval(&count_even, &["2", "4", "6"]), Ok(3));
+        assert_eq!(
+            eval(&count_even, &["2", "3"]),
+            Err("FailedRule(3)".to_string())
+        );
+
+        let sq_range = Spec {
+            combine: Combine::SumSquares,
+            rule: Rule::InRange(0, 10),
+            fn_name: "f",
+        };
+        assert_eq!(eval(&sq_range, &["2", "3"]), Ok(13));
+        assert_eq!(eval(&sq_range, &["11"]), Err("FailedRule(11)".to_string()));
+    }
+
+    #[test]
+    fn pass_and_violate_are_consistent() {
+        for rule in [
+            Rule::NonNegative,
+            Rule::AtMost(10),
+            Rule::NonZero,
+            Rule::AtLeast(5),
+            Rule::InRange(-10, 10),
+            Rule::Even,
+        ] {
+            assert!(
+                passes(&rule, pass_value(&rule)),
+                "pass_value must pass {rule:?}"
+            );
+            assert!(
+                !passes(&rule, violating_value(&rule)),
+                "violating_value must fail {rule:?}"
+            );
+        }
     }
 
     #[test]

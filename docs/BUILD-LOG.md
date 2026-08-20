@@ -8,6 +8,45 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Widened `error-handling` (Q30 lever 2): capacity 3 → ~326
+
+The sampler flagged `error-handling`'s distinct-at-floor capacity as **3** — unusable, below any
+per-epoch seed count. Acted on it directly (Q30 lever 2: enlarge the variable surface):
+
+- **Combine operations 3 → 5**: added `Count` (`acc + 1`) and `SumSquares` (`acc + n*n`). `Min`/`Max`
+  were deliberately *not* added — their `i64::MIN` identity has no safe negative-literal form, and the
+  emitted reference/tests print literals.
+- **Validation rules 3 → 6**: added `AtLeast(b)`, `InRange(lo,hi)`, `Even`. Counting bound choices that
+  is 12 distinct rule-instances, so 5 × 12 = 60 combine/rule logics (up from ~9).
+- **Seed-varied worked examples**: the examples in the prompt and skeleton are now generated per seed
+  (two varied numeric cases + a constructed rule-failure + a parse-failure + empty), where before they
+  were four fixed lists. This also fixes a real gap — the old examples never illustrated a *rule*
+  failure. Native `eval` and the emitted source stay mirrored, so the reference-passes and differential
+  gates still hold.
+
+Verified end to end — `validate-family --family error-handling --seeds 8`, all gates green:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+anti-twin (prompt+skeleton): min=0.287 median=0.438 near-twin pairs (<0.25)=0/28
+epoch sampler: served 8 pairwise-distant seed(s) (rejected 0 collision(s), min=0.287)
+```
+
+| `error-handling` | median | near-twins | distinct-at-floor capacity |
+|---|---|---|---|
+| before | 0.263 | 18/45 | 3 |
+| after | **0.438** | **0/28** | **~326** |
+
+**Honest caveat.** ~326 is *view*-capacity, and part of the lift is example-text variation that the
+shingle metric rewards. That legitimately freshens prompts against exact-text recall but is not skill
+diversity; the genuine distinct-logic surface is the 60 combine/rule combinations. Both clear any
+per-epoch seed count, and acceptance ran ~22% (not ~100%), so it is not pure metric-gaming. The capacity
+regression test was re-pinned to a stable lower bound (`error_handling_capacity_clears_a_per_epoch_count`,
+seats 50) rather than the RNG-sensitive exact figure; `window_op_capacity_at_floor_is_8` stays exact
+(window-op is a true structural ceiling). 61 workspace tests; clippy/fmt clean.
+
+---
+
 ## 2026-08-20 · Distance-aware epoch sampler (Q30) — and it measured a hard capacity ceiling
 
 Built `bench_gen::epoch`, the Q30 second-order fix: a run must not *serve* two near-twins even when a

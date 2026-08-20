@@ -171,14 +171,18 @@ Rust error handling — **is not gradeable by this oracle and is out of scope**.
 `error-plumbing` is worth considering for accuracy. See [REVIEW-3.md](REVIEW-3.md) R3-S4.
 
 Pinning the enum has a measured side effect on **variance**. Because the given enum and the fixed
-plumbing shape are most of what the model sees, `error-handling` instances sit close together — median
-inter-instance distance **0.263** against `borrow-lifetimes`' **0.433**, near the near-twin floor
-(measured on the two Phase-3 exemplar families, [BUILD-LOG](BUILD-LOG.md)). Worse under the sharper
-measure: its **distinct-at-floor capacity is only 3** — it can serve just three tasks that are all
-pairwise `≥ 0.25` apart, against `borrow-lifetimes`' 8. Three is below any usable per-epoch seed count,
-so **this family as designed cannot outlast repeated epochs** and must gain a larger seed-varied surface
-(more combine ops / validation rules) before it ships. The category is correct-by-construction but the
-current parameterisation is too narrow; see [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
+plumbing shape are most of what the model sees, the *first* version of this family sat close together —
+median inter-instance distance 0.263 with a **distinct-at-floor capacity of only 3** (against
+`borrow-lifetimes`' 8), below any usable per-epoch seed count (measured on the Phase-3 exemplar
+families, [BUILD-LOG](BUILD-LOG.md)).
+
+That was fixed by widening the variable surface (Q30 lever 2): combine operations 3 → 5, validation
+rules 3 → 6, and seed-varied worked examples. Capacity rose to **~326** with **0 near-twin pairs** and
+median **0.438** — on par with `borrow-lifetimes` — while every construction gate still passes
+(reference scores 1.000). The genuine distinct-*logic* surface is the 5 × 12 = 60 combine/rule
+combinations; the higher view-capacity also reflects example-text variation, which freshens prompts
+against exact-text recall without adding skill diversity. Both figures clear any per-epoch seed count.
+See [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
 
 ## Per-category oracle weights
 

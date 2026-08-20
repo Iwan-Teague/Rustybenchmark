@@ -197,36 +197,30 @@ mod tests {
     }
 
     #[test]
-    fn sampler_beats_naive_on_the_hard_family() {
-        // The Q30 story on error-handling, in one test:
-        //  (a) taking 6 seeds by raw index yields a set with a near-twin (min < floor);
-        //  (b) a clean 6-set is impossible — the family's capacity at the floor is 3,
-        //      so asking for 6 exhausts, having rejected the collisions rather than
-        //      serving them;
-        //  (c) the 3 it does serve are genuinely floor-clean.
-        let g = ErrorHandlingFamily;
+    fn sampler_serves_a_clean_set_where_raw_index_collides() {
+        // window-op's seeds 0..10 contain near-twin pairs (min 0.122 < floor — the
+        // 7/45 reported by validate-family). The sampler must instead serve a set
+        // that clears the floor, rejecting the collisions. This is the Q30 fix,
+        // demonstrated on the family whose raw-index draw actually collides.
+        let g = WindowOpFamily;
 
-        let naive: Vec<String> = (0..6u64).map(|s| model_view(&g, s)).collect();
+        let naive: Vec<String> = (0..10u64).map(|s| model_view(&g, s)).collect();
         let naive_min = min_pairwise_distance(&naive);
         assert!(
             naive_min < MIN_INSTANCE_DISTANCE,
-            "precondition: raw-index 6-set should contain a near-twin (min {naive_min})"
+            "precondition: raw-index 10-set should contain a near-twin (min {naive_min})"
         );
 
-        let err = plan_epoch_from(&g, 0u64..2_000, 6, MIN_INSTANCE_DISTANCE, 2_000).unwrap_err();
-        assert_eq!(err.accepted, 3, "capacity at floor is 3");
+        let plan = plan_epoch_from(&g, 0u64.., 6, MIN_INSTANCE_DISTANCE, 500).unwrap();
+        assert_eq!(plan.seeds.len(), 6);
         assert!(
-            err.attempts > err.accepted as u32,
-            "sampler must have examined and rejected collisions ({} attempts for {} seated)",
-            err.attempts,
-            err.accepted
-        );
-
-        let clean = plan_epoch_from(&g, 0u64..2_000, 3, MIN_INSTANCE_DISTANCE, 2_000).unwrap();
-        assert!(
-            clean.min_pairwise >= MIN_INSTANCE_DISTANCE,
+            plan.min_pairwise >= MIN_INSTANCE_DISTANCE,
             "served set must clear the floor (min {})",
-            clean.min_pairwise
+            plan.min_pairwise
+        );
+        assert!(
+            plan.rejected() > 0,
+            "sampler should have rejected the raw-index collisions"
         );
     }
 
@@ -241,17 +235,18 @@ mod tests {
         assert_eq!(err.accepted, 1, "only the first seed can ever be seated");
     }
 
-    // The two families' greedy distinct-at-floor capacity, pinned as a regression
-    // guard and as the quantified evidence behind Q30. These are far below the
-    // families' *median* distance would suggest: pairwise-mutual distance is a much
-    // stronger constraint than average distance. If a family change moves these,
-    // the design conversation (per-category floor vs. larger variable surface) must
-    // be revisited — so the test is meant to fail loudly, not be bumped silently.
+    // Distinct-at-floor capacity, pinned as a regression guard and as the
+    // quantified evidence behind Q30. Capacity is far below what a family's
+    // *median* distance suggests: pairwise-mutual distance is a much stronger
+    // constraint than average distance. If a family change drops capacity below
+    // the per-epoch seed count, the family is memorisation-vulnerable — so these
+    // are meant to fail loudly, not be bumped silently.
 
     #[test]
     fn window_op_capacity_at_floor_is_8() {
+        // window-op is intentionally narrow (a handful of window operations), so 8
+        // is its true structural ceiling. Ask for 9 to force the sampler to exhaust.
         let g = WindowOpFamily;
-        // Ask for 9 (one past capacity) so the sampler must exhaust to prove 8.
         let err = plan_epoch_from(&g, 0u64..2_000, 9, MIN_INSTANCE_DISTANCE, 2_000).unwrap_err();
         assert_eq!(
             err.accepted, 8,
@@ -260,14 +255,16 @@ mod tests {
     }
 
     #[test]
-    fn error_handling_capacity_at_floor_is_3() {
+    fn error_handling_capacity_clears_a_per_epoch_count() {
+        // After the surface was widened (5 combines x 6 rules + seed-varied worked
+        // examples, docs/04 + BUILD-LOG 2026-08-20), error-handling seats far more
+        // than the 3 it managed before. Assert a lower bound comfortably above any
+        // per-epoch seed count rather than the exact figure, which is sensitive to
+        // the example RNG. Measured capacity at the floor is ~326.
         let g = ErrorHandlingFamily;
-        let err = plan_epoch_from(&g, 0u64..2_000, 4, MIN_INSTANCE_DISTANCE, 2_000).unwrap_err();
-        assert_eq!(
-            err.accepted, 3,
-            "error-handling seats only 3 distinct instances at 0.25 — below any \
-             per-epoch seed count; the family needs a larger variable surface (Q30)"
-        );
+        let plan = plan_epoch_from(&g, 0u64..1_500, 50, MIN_INSTANCE_DISTANCE, 1_500).unwrap();
+        assert_eq!(plan.seeds.len(), 50);
+        assert!(plan.min_pairwise >= MIN_INSTANCE_DISTANCE);
     }
 
     #[test]

@@ -222,11 +222,17 @@ inspected on its near-twin count, not waved through on its median.
 The sharper measure is **distinct-at-floor capacity**: the most instances a family can serve that are
 all pairwise `≥ min_instance_distance`. The `bench_gen::epoch` sampler computes it by greedily rejecting
 any candidate seed too close to an already-accepted sibling, and it is much smaller than the median
-suggests — `window-op` seats **8**, `error-handling` only **3**. That capacity is the real ceiling on
-how many memorisation-resistant epochs a family can sustain before it must repeat an instance, so it,
-not the median, is the number every Phase-3 family is authored against. The sampler also *serves* the
-epoch: it never emits a near-twin, returning `Exhausted` if a family cannot supply the requested count —
-which is the point at which that family must be enlarged.
+suggests — `window-op` seats **8**. That capacity is the real ceiling on how many memorisation-resistant
+epochs a family can sustain before it must repeat an instance, so it, not the median, is the number
+every Phase-3 family is authored against. The sampler also *serves* the epoch: it never emits a
+near-twin, returning `Exhausted` if a family cannot supply the requested count — which is the point at
+which that family must be enlarged.
+
+`error-handling` is the worked example: it first measured a capacity of **3** (unusable), and widening
+its variable surface — combine ops 3 → 5, rules 3 → 6, seed-varied worked examples — lifted that to
+**~326** with zero near-twins, without breaking any construction gate ([Q30](OPEN-QUESTIONS.md),
+[BUILD-LOG](BUILD-LOG.md)). The lesson for authoring: design the variable surface to a target capacity,
+then let the sampler confirm it.
 
 ## Generator validation (CI, ≥1000 seeds per family)
 
