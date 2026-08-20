@@ -17,6 +17,7 @@ use std::path::PathBuf;
 
 pub mod bit_manipulation;
 pub mod distance;
+pub mod dual_region;
 pub mod epoch;
 pub mod error_handling;
 pub mod grid_reduce;
@@ -176,6 +177,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "bit-ops",
     "raw-ptr",
     "str-transform",
+    "dual-region",
 ];
 
 /// Look up a family by id.
@@ -190,6 +192,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "bit-ops" => Some(Box::new(bit_manipulation::BitManipulationFamily)),
         "raw-ptr" => Some(Box::new(unsafe_core::UnsafeCoreFamily)),
         "str-transform" => Some(Box::new(string_processing::StringProcessingFamily)),
+        "dual-region" => Some(Box::new(dual_region::DualRegionFamily)),
         _ => None,
     }
 }
@@ -284,6 +287,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("str-transform").unwrap().as_ref(), 4000),
             24
+        );
+        // dual-region = 6 pairwise ops x 2 pairings (a second borrow-lifetimes family).
+        assert_eq!(
+            spec_diversity(family("dual-region").unwrap().as_ref(), 4000),
+            12
         );
     }
 }

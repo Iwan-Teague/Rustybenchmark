@@ -8,6 +8,49 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Tenth family: `dual-region` — a *second* `borrow-lifetimes` family
+
+With the tractable categories covered, the next corpus goal is deepening the core categories toward their
+40-family target (docs/04). `borrow-lifetimes` — the project's flagship core category — had only
+`window-op`, so this is its second family, deliberately a **different borrow shape**: a
+`split_at_mut`-shaped problem, which docs/04 names explicitly and `window-op` (single-pass window
+mutation) does not exercise.
+
+The model implements `fn f(v: &mut [i64]) -> usize`: split `v` at its midpoint into two disjoint halves
+and, for each of the `len/2` pairs, apply a seed-selected pairwise op **in place**, returning the count of
+pairs transformed. Rewriting a pair `(x, y)` from *both* values at once (e.g. `SumDiff → (x+y, x-y)`) is
+the canonical case for `split_at_mut` — you need a `&mut` into both halves simultaneously. Seed-selected on
+**op** (Swap / SumDiff / SortPair / AddBoth / DiffBoth / MaxBoth) × **pairing** (Aligned `b[i]` / Mirror
+`b[len-1-i]`) = **12 distinct skills**.
+
+It reuses `window-op`'s two load-bearing pieces: the **constraint-dominant weights** (behavior 0.35 /
+constraint 0.55) and the **allocation instrumentation** (`alloc.rs` counting `#[global_allocator]`), so a
+clone-everything answer — behaviourally correct — is caught by the alloc constraint, which is the whole
+borrow-lifetimes signal. Correct-by-construction (ADR-0003): native `eval` and the emitted reference are
+mirrored (the differential compares *both* the mutated array and the count over 3000 slices); values
+bounded so `SumDiff`/`DiffBoth` can't overflow. `validate-family --seeds 8`, all gates green:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+view       min=0.408 median=0.511 near-twins 0/28
+reference  min=0.120 median=0.296 near-twins 6/28   capacity=6
+spec-diversity: 12 distinct skills
+```
+
+The two trivial baselines are `const-zero` (returns 0, no work) and `identity` (returns the correct count
+`len/2` but does no work — "counts but doesn't transform"); both are caught because the canonical
+`[6, 4, 3, 1]` — first half all greater than second half — is changed with a non-zero count by every one of
+the 12 (op, pairing) combos (pinned as a test). Honest note: reference-capacity is **6**, on the low side —
+the fixed `split_at_mut` loop scaffolding dominates the short solution text, the same pinned-scaffolding
+phenomenon as `stack-machine` (2) and `trait-impl` (1). spec-diversity (12, the authoritative Q31 gate) is
+what the family is authored against, and it clears the bar; the view distance (0 near-twins) keeps prompts
+fresh. One clippy fix along the way: the native `eval`'s index loop tripped `needless_range_loop`, rewritten
+with `enumerate` (the emitted reference keeps the readable index loop — it is a string, graded without
+`-D warnings`). `borrow-lifetimes` now has **2 of its 40** families. 145 workspace tests (+8); clippy
+`-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-20 · `status` — the resume readout (progress · ETA · segment history) (P4)
 
 The docs/08 CLI lists `rustybench status … # progress, ETA, segment history`; built it, and it doubles as
