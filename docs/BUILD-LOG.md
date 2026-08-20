@@ -8,6 +8,43 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · README refreshed + corpus snapshot
+
+Refreshed the README status block, which had drifted to "three families / 71 tests" and listed
+`bench-stats` and resume as "still to come" though both have landed. It now states twelve families across
+nine categories, 157 tests, the full crate list (with `bench-stats`, previously omitted), the run/run-suite/
+stats/status CLI surface, and an honest "still to come" (hardware, the full corpus, `idiom-refactor`'s
+compositional archetype, `unsafe-core`'s miri layer, the mined `wild` suite).
+
+The corpus after this session's authoring pass — the run-suite epoch planner serves all twelve
+(`--dry-run` confirmed):
+
+| family | category | spec-diversity | ref-capacity | notes |
+|---|---|---|---|---|
+| window-op | borrow-lifetimes | 12 | 22 | in-place windows; alloc constraint |
+| dual-region | borrow-lifetimes | 12 | 6 | `split_at_mut` pairs; alloc constraint |
+| error-handling | error-handling | 30 | 7 | parse → validate → `Result` + `?` |
+| checked-eval | error-handling | 12 | 10 | checked arithmetic; overflow/guard errors |
+| trait-impl | traits-generics | 20 | 1 | implement a trait + associated type |
+| generic-select | traits-generics | 16 | 4 | write a generic fn over a trait bound |
+| raw-ptr | unsafe-core | 20 | 18 | forced `unsafe` raw-pointer reads (miri deferred) |
+| bit-ops | bit-manipulation | 20 | 45 | mask → rotate/reverse/swap |
+| str-transform | string-processing | 24 | 56 | filter → case-map → order |
+| stack-machine | pattern-matching | 40 | 2 | exhaustive `match` over an enum |
+| seq-transform | iterators | 48 | 43 | filter → map → terminal |
+| grid-reduce | data-structures | 12 | 31 | 2-D grid reduction |
+
+Every spec-diversity clears any plausible per-epoch seed count (the authoritative Q31 gate). The
+ref-capacity column is the honest text proxy, deflated by fixed scaffolding — the pinned-interface families
+(`trait-impl` 1, `stack-machine` 2, `generic-select` 4, `dual-region` 6, `error-handling` 7) sit low, the
+short-body families (`str-transform` 56, `bit-ops` 45, `seq-transform` 43) high — which is exactly why the
+gate is spec-diversity, not reference-distance (docs/17). **4 of 5 docs/04 core categories covered**
+(`borrow-lifetimes`, `error-handling`, `traits-generics` at 2 families each; `unsafe-core` at 1); only
+`idiom-refactor` is unstarted, pending the compositional/inverse-transform archetype (a framework addition,
+not a per-family one — roadmap P3 R2-S6). Docs only; 157 tests, clippy/fmt clean.
+
+---
+
 ## 2026-08-21 · Twelfth family: `checked-eval` — a *second* `error-handling` family
 
 Brings the third core category to two families. `error-handling` (#1) is parse-then-validate over
