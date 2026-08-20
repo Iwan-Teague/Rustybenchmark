@@ -504,6 +504,21 @@ fn validate_family(
         // for prompt freshness (contamination-resistance).
         let diversity = bench_gen::spec_diversity(g.as_ref(), 4000);
         println!("  spec-diversity: {diversity} distinct skills (the authoritative task-diversity measure — Q31)");
+
+        // The spec-aware epoch serve-path: cover distinct skills, not just distinct
+        // prompts. Request the validated count; it should serve that many skills so
+        // long as the count is within the family's diversity.
+        match bench_gen::epoch::plan_epoch_distinct_skills(g.as_ref(), 0u64.., want, floor, 5000) {
+            Ok(plan) => println!(
+                "  distinct-skills epoch: served {} seed(s) covering {} distinct skills",
+                plan.seeds.len(),
+                plan.distinct_skills(),
+            ),
+            Err(e) => println!(
+                "  distinct-skills epoch: only {} distinct skills available (asked {want}) — family too narrow for this per-epoch count",
+                e.accepted,
+            ),
+        }
     }
 
     let _ = std::fs::remove_dir_all(scratch);

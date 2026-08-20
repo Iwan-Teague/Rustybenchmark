@@ -8,6 +8,29 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Epoch sampler serves distinct *skills* (Q31 follow-on)
+
+The Q31 decision left one piece unbuilt: the epoch sampler served on view-distance, which post-finding is
+near-vacuous, so within an epoch it did not guarantee distinct *skills* — it could spend several of its
+`n` slots on the same skill with different constants. Built `plan_epoch_distinct_skills`: it rejects a
+candidate whose `spec_signature` is already served (the point — cover different skills), and still
+enforces view-distance for prompt freshness (contamination). It `Exhausted`s once the family's distinct
+skills run out.
+
+- `EpochPlan` now carries the served `specs` and a `distinct_skills()` count.
+- A test cross-checks the serve-path against `spec_diversity`: asking window-op for 13 distinct skills
+  exhausts at exactly **12**, its diversity. Plus determinism and unique-specs tests.
+- `validate-family` demonstrates it: "distinct-skills epoch: served 6 seed(s) covering 6 distinct skills".
+
+This surfaced a **new tension for Phase 4 / P3.5**, recorded under Q31: "one seed per skill per epoch"
+maximises coverage, but the ICC / repeated-measures design may want *several* seeds of the same skill to
+estimate within-skill variance. Different serving policies for different purposes; likely an epoch covers
+distinct skills while a separate repeated-measures pass samples same-skill seeds. Not settled here — and
+neither planner is wired into a run protocol yet, because there is no run protocol yet. 66 workspace
+tests; clippy/fmt clean.
+
+---
+
 ## 2026-08-20 · Q31 decided — spec-diversity as the authoritative task-diversity measure
 
 Acting on the Q31 finding (previous entry), and on the "two gates" decision: added a

@@ -18,6 +18,13 @@
 //! If a family genuinely cannot supply `N` distinct instances within the attempt
 //! budget, [`plan_epoch`] returns [`Exhausted`] rather than silently serving
 //! twins: that is a real family defect and is meant to be loud.
+//!
+//! Post-Q31, view-distance is a weak per-epoch constraint (seed-varied examples
+//! saturate it). The stronger, ungameable one is *skill* distinctness:
+//! [`plan_epoch_distinct_skills`] serves `n` seeds covering `n` different
+//! `spec_signature`s (docs/OPEN-QUESTIONS.md Q31), still enforcing view-distance
+//! for prompt freshness. It `Exhausted`s once the family's distinct skills run
+//! out — the loud signal that the family is too narrow for the per-epoch count.
 
 use crate::{derive_seed, distance, GeneratedTask, Generator};
 use std::path::Path;
@@ -45,11 +52,13 @@ pub fn model_view(gen: &dyn Generator, seed: u64) -> String {
 
 /// A deterministic epoch plan: `seeds` whose pairwise model-view distances all
 /// clear the threshold. `attempts` is how many candidates were examined to find
-/// them; `min_pairwise` is the realised minimum (>= threshold by construction).
+/// them; `min_pairwise` is the realised minimum (>= threshold by construction);
+/// `specs` is the canonical spec-signature of each served seed (Q31).
 #[derive(Debug, Clone)]
 pub struct EpochPlan {
     pub seeds: Vec<u64>,
     pub views: Vec<String>,
+    pub specs: Vec<String>,
     pub attempts: u32,
     pub min_pairwise: f64,
 }
@@ -59,6 +68,24 @@ impl EpochPlan {
     pub fn rejected(&self) -> u32 {
         self.attempts - self.seeds.len() as u32
     }
+
+    /// How many distinct skills the served seeds cover. Equal to `seeds.len()`
+    /// for a plan built by [`plan_epoch_distinct_skills`]; may be fewer for the
+    /// view-only [`plan_epoch_from`], which does not reject spec-collisions.
+    pub fn distinct_skills(&self) -> usize {
+        let mut set: Vec<&String> = self.specs.iter().collect();
+        set.sort();
+        set.dedup();
+        set.len()
+    }
+}
+
+/// The canonical (order-independent) spec-signature key for `seed` — the family's
+/// structural identity (Q31), used to detect within-epoch skill collisions.
+pub fn spec_key(gen: &dyn Generator, seed: u64) -> String {
+    let mut sig = gen.spec_signature(seed);
+    sig.sort();
+    sig.join("|")
 }
 
 /// The family could not supply `wanted` pairwise-distant instances within the
@@ -131,9 +158,73 @@ where
         min_pairwise >= threshold || seeds.len() < 2,
         "accepted set must satisfy the floor by construction"
     );
+    let specs = seeds.iter().map(|&s| spec_key(gen, s)).collect();
     Ok(EpochPlan {
         seeds,
         views,
+        specs,
+        attempts,
+        min_pairwise,
+    })
+}
+
+/// Select `n` seeds that cover `n` **distinct skills** (Q31): a candidate is
+/// rejected if its spec-signature is already served, *or* if its model-view is
+/// within `view_floor` of an accepted sibling. The first constraint is the point
+/// — an epoch should test different skills, not the same skill `n` times with
+/// different constants; the second keeps prompts fresh (contamination). Exhausts
+/// if the family has fewer than `n` distinct skills, which is the loud signal
+/// that the family is too narrow for this per-epoch count.
+///
+/// Greedy and order-dependent, so reproducible from the candidate order.
+pub fn plan_epoch_distinct_skills<I>(
+    gen: &dyn Generator,
+    candidates: I,
+    n: usize,
+    view_floor: f64,
+    max_attempts: u32,
+) -> Result<EpochPlan, Exhausted>
+where
+    I: IntoIterator<Item = u64>,
+{
+    let mut seeds: Vec<u64> = Vec::with_capacity(n);
+    let mut views: Vec<String> = Vec::with_capacity(n);
+    let mut specs: Vec<String> = Vec::with_capacity(n);
+    let mut attempts = 0u32;
+
+    for seed in candidates {
+        if seeds.len() >= n || attempts >= max_attempts {
+            break;
+        }
+        attempts += 1;
+        let key = spec_key(gen, seed);
+        if specs.contains(&key) {
+            continue; // skill-collision: this epoch already covers it
+        }
+        let view = model_view(gen, seed);
+        let fresh = views
+            .iter()
+            .all(|v| distance::shingle_distance(v, &view, distance::K) >= view_floor);
+        if fresh {
+            seeds.push(seed);
+            views.push(view);
+            specs.push(key);
+        }
+    }
+
+    if seeds.len() < n {
+        return Err(Exhausted {
+            accepted: seeds.len(),
+            wanted: n,
+            attempts,
+        });
+    }
+
+    let min_pairwise = min_pairwise_distance(&views);
+    Ok(EpochPlan {
+        seeds,
+        views,
+        specs,
         attempts,
         min_pairwise,
     })
@@ -303,5 +394,43 @@ mod tests {
         let v = view_of(&task);
         assert!(v.starts_with(&task.prompt));
         assert!(v.contains("todo!"), "view must include the skeleton body");
+    }
+
+    // The Q31 follow-on: an epoch should cover distinct *skills*, not just distinct
+    // prompts. plan_epoch_distinct_skills rejects within-epoch spec-collisions.
+
+    #[test]
+    fn distinct_skills_plan_serves_unique_specs() {
+        let g = ErrorHandlingFamily;
+        let plan =
+            plan_epoch_distinct_skills(&g, 0u64.., 10, MIN_INSTANCE_DISTANCE, 2_000).unwrap();
+        assert_eq!(plan.seeds.len(), 10);
+        assert_eq!(
+            plan.distinct_skills(),
+            10,
+            "every served seed must cover a different skill"
+        );
+    }
+
+    #[test]
+    fn distinct_skills_plan_exhausts_past_spec_diversity() {
+        // window-op has exactly 12 distinct skills (crate::spec_diversity). Asking
+        // for 13 distinct skills must exhaust at 12 — the loud signal that the family
+        // is too narrow for the requested per-epoch count.
+        let g = WindowOpFamily;
+        let err = plan_epoch_distinct_skills(&g, 0u64..5_000, 13, MIN_INSTANCE_DISTANCE, 5_000)
+            .unwrap_err();
+        assert_eq!(
+            err.accepted, 12,
+            "window-op serves 12 distinct skills, no more"
+        );
+    }
+
+    #[test]
+    fn distinct_skills_plan_is_deterministic() {
+        let g = ErrorHandlingFamily;
+        let a = plan_epoch_distinct_skills(&g, 0u64.., 8, MIN_INSTANCE_DISTANCE, 2_000).unwrap();
+        let b = plan_epoch_distinct_skills(&g, 0u64.., 8, MIN_INSTANCE_DISTANCE, 2_000).unwrap();
+        assert_eq!(a.seeds, b.seeds);
     }
 }

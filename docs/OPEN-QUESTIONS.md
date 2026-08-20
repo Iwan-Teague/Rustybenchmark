@@ -585,6 +585,20 @@ as regression tests.
 
 **Still open, downstream:** the per-family *floor* — the minimum spec-diversity a family must clear to
 ship — is not yet fixed; it depends on the per-epoch seed count chosen in Phase 4, and it folds back into
-[Q30](#q30--anti-twin-variance-is-per-family-not-global). And the epoch sampler arguably should *also*
-reject within-epoch spec-collisions (serve distinct skills, not just distinct prompts); deferred until
-the per-epoch count is known.
+[Q30](#q30--anti-twin-variance-is-per-family-not-global).
+
+**Spec-collision rejection — built ([BUILD-LOG](BUILD-LOG.md) 2026-08-20).** `bench_gen::epoch` now has
+`plan_epoch_distinct_skills`, which serves `n` seeds covering `n` *distinct* skills (rejects a candidate
+whose spec-signature is already served, and still enforces view-distance for freshness). It `Exhausted`s
+if the family has fewer than `n` distinct skills — the loud signal that a family is too narrow for the
+requested per-epoch count. `validate-family` demonstrates it, and a test cross-checks that window-op
+serves exactly its 12 skills and no more. `EpochPlan` carries the served `specs` and a `distinct_skills()`
+count.
+
+> **New tension this exposes, for Phase 4/P3.5 to resolve.** "One seed per skill per epoch" maximises
+> coverage, but the ICC / repeated-measures design (docs/07) may want *several* seeds of the **same**
+> skill within a run to estimate within-skill score variance. These are different serving policies for
+> different purposes. Likely resolution: an epoch serves distinct skills (coverage), and a *separate*
+> repeated-measures pass samples same-skill seeds for variance — but that is a Phase-4 decision, not
+> settled here. Until then `plan_epoch_distinct_skills` exists alongside the view-only `plan_epoch_from`;
+> neither is yet wired into a run protocol (there is no run protocol yet).
