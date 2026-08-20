@@ -58,9 +58,23 @@ fn default_epoch() -> String {
     "local".to_string()
 }
 
+/// Per-unit cost, as journalled. All fields default so older or hand-written journals
+/// (and the synthetic test records) parse with zero timing.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Cost {
+    #[serde(default)]
+    pub prompt_tokens: u32,
+    #[serde(default)]
+    pub completion_tokens: u32,
+    #[serde(default)]
+    pub gen_ms: u64,
+    #[serde(default)]
+    pub grade_ms: u64,
+}
+
 /// One graded unit, as read from a journal line. Only the fields statistics needs
-/// are declared; serde ignores the rest (`model`, `cost`, `sandbox`, …). `kind`,
-/// `index` and `epoch` default for pre-run-protocol journals that predate them.
+/// are declared; serde ignores the rest (`model`, `sandbox`, …). `kind`, `index`,
+/// `epoch` and `cost` default for journals that predate them.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Record {
     pub task_id: String,
@@ -72,6 +86,8 @@ pub struct Record {
     pub index: u32,
     #[serde(default = "default_epoch")]
     pub epoch: String,
+    #[serde(default)]
+    pub cost: Cost,
 }
 
 impl Record {
@@ -129,6 +145,7 @@ impl Record {
             kind: kind.to_string(),
             index,
             epoch: epoch.to_string(),
+            cost: Cost::default(),
         }
     }
 }
@@ -493,6 +510,9 @@ pub struct StatReport {
     /// Number of categories the per-category CIs are corrected over (the `K` in
     /// the simultaneous `α/K`).
     pub simultaneous_k: usize,
+    /// Throughput over every executed unit (core + probe); `None` if the journal
+    /// carried no timing. The second headline number beside `capability_score`.
+    pub throughput: Option<ThroughputReport>,
     /// Pooled within-family ICC across all categories (families compared within their
     /// own category, so category effects cancel). The shrink target for the per-category
     /// estimates; `None` when not estimable. Diagnostic only (Q29.2).
@@ -506,6 +526,10 @@ pub fn report(records: &[Record]) -> StatReport {
 
 /// As [`report`], with an explicit bootstrap resample count (tests use a smaller one).
 pub fn report_with(records: &[Record], iters: usize) -> StatReport {
+    // Throughput is measured over *every* executed unit (core + probe both cost wall
+    // time), so compute it before the core filter below.
+    let throughput = throughput(records);
+
     // Only the paired **core** is scored — the fresh probe is the precomputation
     // detector and never enters a published figure (ADR-0009). Filtering here is the
     // one place that rule is enforced for capability, pass-rate, CIs and ICC.
@@ -584,6 +608,7 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
         bootstrap_iters: iters,
         simultaneous_k: k,
         pooled_icc,
+        throughput,
     }
 }
 
@@ -842,6 +867,82 @@ pub fn detect(records: &[Record], threshold: f64) -> Vec<DetectorReport> {
         });
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Throughput — the second headline number (docs/00 two-number thesis, docs/07)
+// ---------------------------------------------------------------------------
+
+/// What the machine delivered while running the suite. Computed over **every executed
+/// unit** (core *and* probe both consume wall-clock time), except `passes_per_hour`,
+/// which counts only scored core passes (the probe is never scored, ADR-0009).
+#[derive(Clone, Debug)]
+pub struct ThroughputReport {
+    /// Executed units that carried timing.
+    pub units: usize,
+    /// Aggregate decode rate: completion tokens ÷ generate seconds. GPU-bound, so this
+    /// is the model/hardware number, largely insensitive to CPU contention.
+    pub decode_tok_per_s: f64,
+    pub gen_s: f64,
+    pub grade_s: f64,
+    pub wall_s: f64,
+    /// Executed units per hour of wall clock.
+    pub units_per_hour: f64,
+    /// Scored core passes per hour — docs/07's `throughput_score`.
+    pub passes_per_hour: f64,
+    /// Fraction of wall spent grading rather than generating.
+    pub grade_share: f64,
+}
+
+/// Fold a journal's per-unit costs into the throughput report. `None` when no unit
+/// carried timing (e.g. synthetic records), so the caller can omit the section rather
+/// than print zeros.
+pub fn throughput(records: &[Record]) -> Option<ThroughputReport> {
+    let mut gen_ms = 0u64;
+    let mut grade_ms = 0u64;
+    let mut ctoks = 0u64;
+    let mut units = 0usize;
+    let mut core_passes = 0usize;
+    for r in records {
+        let c = &r.cost;
+        if c.gen_ms == 0 && c.grade_ms == 0 {
+            continue; // no timing recorded for this unit
+        }
+        gen_ms += c.gen_ms;
+        grade_ms += c.grade_ms;
+        ctoks += c.completion_tokens as u64;
+        units += 1;
+        if r.kind == "core" && r.passed() {
+            core_passes += 1;
+        }
+    }
+    if units == 0 {
+        return None;
+    }
+    let gen_s = gen_ms as f64 / 1000.0;
+    let grade_s = grade_ms as f64 / 1000.0;
+    let wall_s = gen_s + grade_s;
+    let per_hour = |n: f64| {
+        if wall_s > 0.0 {
+            n * 3600.0 / wall_s
+        } else {
+            0.0
+        }
+    };
+    Some(ThroughputReport {
+        units,
+        decode_tok_per_s: if gen_s > 0.0 {
+            ctoks as f64 / gen_s
+        } else {
+            0.0
+        },
+        gen_s,
+        grade_s,
+        wall_s,
+        units_per_hour: per_hour(units as f64),
+        passes_per_hour: per_hour(core_passes as f64),
+        grade_share: if wall_s > 0.0 { grade_s / wall_s } else { 0.0 },
+    })
 }
 
 #[cfg(test)]
@@ -1171,6 +1272,39 @@ mod tests {
         let e2 = d.iter().find(|r| r.epoch == "e2").unwrap();
         // e2: core and probe both failed → concordant → no discordance.
         assert_eq!((e2.sign.core_wins, e2.sign.probe_wins), (0, 0));
+    }
+
+    #[test]
+    fn throughput_folds_cost_over_all_units() {
+        // Two core units and one probe, each with timing. Throughput counts all three
+        // for wall/tok/s but only the passing core toward passes/hour.
+        let mk = |kind: &str, passed: bool, ctoks: u32, gen_ms: u64, grade_ms: u64| {
+            let line = format!(
+                r#"{{"task_id":"f/{ct:016x}","category":"c","kind":"{kind}","index":0,"epoch":"e","cost":{{"prompt_tokens":100,"completion_tokens":{ct},"gen_ms":{gen_ms},"grade_ms":{grade_ms}}},"oracle":{{"apply_ok":true,"compile_ok":true,"error_codes":[],"warn_count":0,"behavior":{{"unit":null,"property":null,"differential":null,"score":{beh}}},"constraint":{{"alloc_ok":null,"clippy_clean":null,"fmt_ok":null,"unsafe_blocks":null,"unsafe_ok":null,"paths_ok":null,"violations":[],"score":null}},"score":0.5,"failure_class":"none","flags":[]}}}}"#,
+                ct = ctoks,
+                beh = if passed { "1.0" } else { "0.5" },
+            );
+            parse_journal(&line).unwrap().pop().unwrap()
+        };
+        let recs = vec![
+            mk("core", true, 100, 2000, 500),  // 50 tok/s
+            mk("core", false, 100, 2000, 500), // compiled? behaviour 0.5 -> not a pass
+            mk("probe", true, 100, 2000, 500),
+        ];
+        let t = throughput(&recs).unwrap();
+        assert_eq!(t.units, 3);
+        assert!(
+            (t.decode_tok_per_s - 50.0).abs() < 1e-6,
+            "{}",
+            t.decode_tok_per_s
+        );
+        assert!((t.wall_s - 7.5).abs() < 1e-6); // 3 * (2.0 + 0.5)
+        assert!((t.grade_share - 0.2).abs() < 1e-6); // 1.5 / 7.5
+                                                     // 3 units in 7.5s -> 1440/hour; 1 core pass in 7.5s -> 480/hour.
+        assert!((t.units_per_hour - 1440.0).abs() < 1e-3);
+        assert!((t.passes_per_hour - 480.0).abs() < 1e-3);
+        // Synthetic records (no timing) → None.
+        assert!(throughput(&[Record::synthetic("c", "f", 0, 1.0, true)]).is_none());
     }
 
     #[test]

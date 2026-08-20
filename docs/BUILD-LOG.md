@@ -8,6 +8,34 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Throughput in `stats` — the second headline number
+
+The project's thesis is two numbers (capability + throughput), but `stats` reported only capability. Folded
+throughput in, computed from the journal's `cost` fields.
+
+- `bench_stats::Record` gained a `cost` sub-struct (prompt/completion tokens, `gen_ms`, `grade_ms`), serde-
+  defaulted so older journals and synthetic records parse with zero timing.
+- `throughput(records) -> Option<ThroughputReport>`: aggregate decode tok/s (completion tokens ÷ generate
+  seconds — GPU-bound, so the model/hardware number), per-unit wall (gen + grade), grade share,
+  **units/hour**, and **passes/hour** (docs/07's `throughput_score`, counting only scored *core* passes).
+  Measured over *every executed unit* (core + probe both cost wall time), so it is computed before the
+  core-only filter; `None` when no unit carried timing.
+- `stats` now prints both headline numbers; wired into `StatReport.throughput`.
+
+On the clean live run (`runs/clean.jsonl`, Qwen2.5-3B on Metal, VM already gone): **decode 53.5 tok/s,
+3.8 s/unit (3.3 gen + 0.5 grade), grade 12% of wall, 945 units/hour, 157 passes/hour.** Matches the
+hand-computed numbers exactly.
+
+Test pins the arithmetic on a crafted cost-bearing journal (3 units → 50 tok/s, 1440 units/hr,
+480 passes/hr) and that synthetic records yield `None`. Workspace 108; clippy/fmt clean.
+
+Note recorded from the live data: grade time is dominated by whether tests *ran* (a compiling/passing
+answer executes the 3000-iter differential ≈1 s; a compile-fail short-circuits ≈0.1 s), not primarily by
+cache warmth — so the docs/08 "exclude first-N for cache warmth" refinement (needs `segment_position`) is
+a smaller effect than the compile-success split, and is still future work.
+
+---
+
 ## 2026-08-20 · Live smoke run (Qwen2.5-3B on Metal) — whole loop end-to-end, and it caught a bug
 
 Ran the full pipeline against a real model for the first time: `llama-server` serving

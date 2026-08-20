@@ -815,6 +815,24 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
         }
         None => println!("pooled ICC = n/a (needs >=2 families with >=2 seeds each to estimate)"),
     }
+    match &r.throughput {
+        Some(t) => {
+            println!("throughput (over {} executed units, core+probe):", t.units);
+            println!(
+                "  decode {:.1} tok/s  |  {:.1} s/unit ({:.1}s gen + {:.1}s grade, grade {:.0}% of wall)",
+                t.decode_tok_per_s,
+                t.wall_s / t.units as f64,
+                t.gen_s / t.units as f64,
+                t.grade_s / t.units as f64,
+                t.grade_share * 100.0,
+            );
+            println!(
+                "  {:.0} units/hour  |  {:.0} passes/hour (throughput_score)",
+                t.units_per_hour, t.passes_per_hour
+            );
+        }
+        None => println!("throughput = n/a (journal carries no timing)"),
+    }
     println!(
         "note: family-level cluster bootstrap ({} resamples) — a lower bound on CI width until shapes are labelled (Q24).",
         r.bootstrap_iters
