@@ -287,6 +287,94 @@ pub fn reference_capacity(gen: &dyn Generator, upto: u64, threshold: f64) -> usi
     greedy_distinct_count(&refs, threshold)
 }
 
+// ---------------------------------------------------------------------------
+// Run plan — the paired-core / fresh-probe seed sets for one epoch (ADR-0009)
+// ---------------------------------------------------------------------------
+
+/// Which seed set a unit belongs to (ADR-0009).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnitKind {
+    /// Paired core — `blake3(epoch ‖ family ‖ i)`, identical for every submitter,
+    /// **scored**; the basis of all published figures and McNemar pairing.
+    Core,
+    /// Fresh probe — `blake3(probe_nonce ‖ family ‖ i)`, **never scored**; the
+    /// precomputation detector (the sign test pairs each probe with its family's core).
+    Probe,
+}
+
+impl UnitKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UnitKind::Core => "core",
+            UnitKind::Probe => "probe",
+        }
+    }
+}
+
+/// One planned unit of an epoch run: a family, its seed set, the index within that set,
+/// and the derived seed. Idempotent — the seed fully determines the instance and grade
+/// (docs/08), which is what makes resume trivially correct.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunUnit {
+    pub family: String,
+    pub kind: UnitKind,
+    pub index: u32,
+    pub seed: u64,
+}
+
+impl RunUnit {
+    /// Stable within-epoch key for resume dedup. The epoch is implicit (a plan and the
+    /// journal filter share one epoch), so `family | kind | index` identifies the unit.
+    pub fn key(&self) -> String {
+        format!("{}|{}|{}", self.family, self.kind.as_str(), self.index)
+    }
+}
+
+/// The probe nonce for an epoch. In production this is a per-batch challenge nonce
+/// ([docs/10](../../../docs/10-integrity.md), ADR-0009), so probe seeds do not exist
+/// before the run is requested. Locally it is derived from the epoch so a run is
+/// reproducible and resumable while still occupying a seed space disjoint from the core.
+pub fn probe_nonce(epoch: &str) -> String {
+    format!("{epoch}::probe")
+}
+
+/// Plan one epoch: `n_core` paired-core plus `n_probe` fresh-probe seeds for each family,
+/// in a deterministic order. Core seeds derive from `epoch` (shared across submitters);
+/// probe seeds derive from [`probe_nonce`] (the detector set).
+pub fn plan_run(families: &[&str], epoch: &str, n_core: u32, n_probe: u32) -> Vec<RunUnit> {
+    let probe = probe_nonce(epoch);
+    let mut out = Vec::new();
+    for &family in families {
+        for index in 0..n_core {
+            out.push(RunUnit {
+                family: family.to_string(),
+                kind: UnitKind::Core,
+                index,
+                seed: derive_seed(epoch, family, index),
+            });
+        }
+        for index in 0..n_probe {
+            out.push(RunUnit {
+                family: family.to_string(),
+                kind: UnitKind::Probe,
+                index,
+                seed: derive_seed(&probe, family, index),
+            });
+        }
+    }
+    out
+}
+
+/// Filter a plan to the units not yet recorded (by [`RunUnit::key`]) — the resume step.
+/// Because units are idempotent, skipping the done ones and running the rest reproduces
+/// exactly the same journal a single uninterrupted run would have (docs/09).
+pub fn remaining(plan: &[RunUnit], done: &std::collections::HashSet<String>) -> Vec<RunUnit> {
+    plan.iter()
+        .filter(|u| !done.contains(&u.key()))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +482,56 @@ mod tests {
         let v = view_of(&task);
         assert!(v.starts_with(&task.prompt));
         assert!(v.contains("todo!"), "view must include the skeleton body");
+    }
+
+    #[test]
+    fn run_plan_is_deterministic_and_sized() {
+        let fams = ["window-op", "error-handling"];
+        let a = plan_run(&fams, "2026-08", 4, 1);
+        let b = plan_run(&fams, "2026-08", 4, 1);
+        assert_eq!(a, b, "same epoch → identical plan (resume depends on it)");
+        assert_eq!(a.len(), 2 * (4 + 1), "n_families × (core + probe)");
+        assert_eq!(a.iter().filter(|u| u.kind == UnitKind::Core).count(), 8);
+        assert_eq!(a.iter().filter(|u| u.kind == UnitKind::Probe).count(), 2);
+    }
+
+    #[test]
+    fn core_and_probe_seed_spaces_are_disjoint() {
+        // Same family+index, but core and probe must derive different seeds — the whole
+        // point of ADR-0009 (probe seeds unpredictable from the public epoch).
+        let plan = plan_run(&["window-op"], "e", 3, 3);
+        for i in 0..3 {
+            let core = plan
+                .iter()
+                .find(|u| u.kind == UnitKind::Core && u.index == i)
+                .unwrap();
+            let probe = plan
+                .iter()
+                .find(|u| u.kind == UnitKind::Probe && u.index == i)
+                .unwrap();
+            assert_ne!(core.seed, probe.seed);
+        }
+    }
+
+    #[test]
+    fn different_epochs_give_different_core_seeds() {
+        let a = plan_run(&["window-op"], "2026-08", 2, 0);
+        let b = plan_run(&["window-op"], "2026-09", 2, 0);
+        assert_ne!(a[0].seed, b[0].seed, "core seeds rotate with the epoch");
+    }
+
+    #[test]
+    fn remaining_skips_done_units() {
+        let plan = plan_run(&["window-op", "error-handling"], "e", 2, 1);
+        // Mark the first two units done.
+        let done: std::collections::HashSet<String> =
+            plan.iter().take(2).map(|u| u.key()).collect();
+        let left = remaining(&plan, &done);
+        assert_eq!(left.len(), plan.len() - 2);
+        assert!(left.iter().all(|u| !done.contains(&u.key())));
+        // Resuming an already-complete run leaves nothing to do.
+        let all: std::collections::HashSet<String> = plan.iter().map(|u| u.key()).collect();
+        assert!(remaining(&plan, &all).is_empty());
     }
 
     // The Q31 follow-on: an epoch should cover distinct *skills*, not just distinct

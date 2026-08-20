@@ -70,6 +70,31 @@ enum Command {
         #[arg(long)]
         journal_b: PathBuf,
     },
+    /// Run a whole epoch over every family: paired-core + fresh-probe seeds, resumable.
+    RunSuite {
+        #[arg(long)]
+        model: String,
+        #[arg(long, default_value = "local")]
+        model_name: String,
+        /// Epoch label — fixes the paired-core seed set (ADR-0009).
+        #[arg(long)]
+        epoch: String,
+        /// Paired-core seeds per family (scored).
+        #[arg(long, default_value_t = 4)]
+        seeds_core: u32,
+        /// Fresh-probe seeds per family (precomputation detector; never scored).
+        #[arg(long, default_value_t = 1)]
+        seeds_probe: u32,
+        #[arg(long, default_value = "runs/journal.jsonl")]
+        out: PathBuf,
+        #[arg(long, default_value = "runs/ws")]
+        scratch: PathBuf,
+        #[arg(long, default_value_t = 120)]
+        wall_timeout_secs: u64,
+        /// Print the plan (after resume filtering) without calling the model.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Everything needed to grade one task, from either source.
@@ -122,6 +147,27 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             journal_a,
             journal_b,
         } => compare(&journal_a, &journal_b),
+        Command::RunSuite {
+            model,
+            model_name,
+            epoch,
+            seeds_core,
+            seeds_probe,
+            out,
+            scratch,
+            wall_timeout_secs,
+            dry_run,
+        } => run_suite(
+            &model,
+            &model_name,
+            &epoch,
+            seeds_core,
+            seeds_probe,
+            &out,
+            &scratch,
+            wall_timeout_secs,
+            dry_run,
+        ),
     }
 }
 
@@ -309,6 +355,59 @@ fn run(
         task.id
     );
 
+    let line = grade_and_line(
+        &task,
+        base_url,
+        model_name,
+        scratch_root,
+        wall_timeout_secs,
+        "local",
+        "core",
+        0,
+        0,
+    )?;
+    append_journal(out, &line)?;
+
+    let v = &line.oracle;
+    println!(
+        "  score {:.3}  apply={} compile={} unit={:?} diff={:?} behavior={:?} constraint={:?} failure={:?}",
+        v.score,
+        v.apply_ok,
+        v.compile_ok,
+        v.behavior.unit,
+        v.behavior.differential,
+        v.behavior.score,
+        v.constraint.score,
+        v.failure_class
+    );
+    if !v.error_codes.is_empty() {
+        println!("  rustc: {}", v.error_codes.join(", "));
+    }
+    if !v.flags.is_empty() {
+        println!("  flags: {}", v.flags.join(", "));
+    }
+    println!("  journal → {}", out.display());
+    Ok(())
+}
+
+/// Call the model on one task, grade the response under the sandbox, and build the
+/// journal line — the single-unit core shared by `run` and `run-suite`.
+#[allow(clippy::too_many_arguments)]
+fn grade_and_line(
+    task: &Task,
+    base_url: &str,
+    model_name: &str,
+    scratch_root: &Path,
+    wall_timeout_secs: u64,
+    epoch: &str,
+    kind: &str,
+    seed: u64,
+    index: u32,
+) -> Result<JournalLine, Box<dyn std::error::Error>> {
+    let containment = match bench_sandbox::available() {
+        bench_sandbox::Containment::Seatbelt => "seatbelt",
+        bench_sandbox::Containment::Unsupported => "unsupported",
+    };
     let client = ModelClient::new(base_url, model_name);
     let completion = client.complete(
         &task.system_prompt,
@@ -322,13 +421,13 @@ fn run(
 
     let unit = WorkUnit {
         task_id: TaskId(task.id.clone()),
-        seed: Seed(0),
-        index: 0,
+        seed: Seed(seed),
+        index,
     };
     let tag = unit.unit_id().0.replace(':', "_");
     let grade_start = std::time::Instant::now();
     let vector = grade(
-        &task,
+        task,
         &completion.text,
         scratch_root,
         &tag,
@@ -336,13 +435,15 @@ fn run(
     )?;
     let grade_ms = grade_start.elapsed().as_millis() as u64;
 
-    let line = JournalLine {
+    Ok(JournalLine {
         schema: 1,
         unit_id: unit.unit_id().0,
         task_id: task.id.clone(),
         category: task.category.clone(),
-        seed: unit.seed.0,
-        index: unit.index,
+        seed,
+        index,
+        epoch: epoch.to_string(),
+        kind: kind.to_string(),
         model: ModelInfo {
             name: model_name.to_string(),
             base_url: base_url.to_string(),
@@ -357,28 +458,130 @@ fn run(
             grade_ms,
         },
         failure_class: vector.failure_class,
-    };
-    append_journal(out, &line)?;
+    })
+}
 
+// ---------------------------------------------------------------------------
+// run-suite — epoch orchestration with paired-core / fresh-probe + resume
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+fn run_suite(
+    base_url: &str,
+    model_name: &str,
+    epoch: &str,
+    n_core: u32,
+    n_probe: u32,
+    out: &Path,
+    scratch_root: &Path,
+    wall_timeout_secs: u64,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let plan = bench_gen::epoch::plan_run(bench_gen::FAMILY_IDS, epoch, n_core, n_probe);
+    let done = read_done_keys(out, epoch)?;
+    let todo = bench_gen::epoch::remaining(&plan, &done);
     println!(
-        "  score {:.3}  apply={} compile={} unit={:?} diff={:?} behavior={:?} constraint={:?} failure={:?}",
-        vector.score,
-        vector.apply_ok,
-        vector.compile_ok,
-        vector.behavior.unit,
-        vector.behavior.differential,
-        vector.behavior.score,
-        vector.constraint.score,
-        vector.failure_class
+        "epoch {epoch}: {} units planned ({} core + {} probe over {} families), {} done, {} to run",
+        plan.len(),
+        n_core as usize * bench_gen::FAMILY_IDS.len(),
+        n_probe as usize * bench_gen::FAMILY_IDS.len(),
+        bench_gen::FAMILY_IDS.len(),
+        plan.len() - todo.len(),
+        todo.len(),
     );
-    if !vector.error_codes.is_empty() {
-        println!("  rustc: {}", vector.error_codes.join(", "));
+
+    if dry_run {
+        for u in &todo {
+            println!(
+                "  [plan] {:<14} {:<5} idx={} seed={:016x}",
+                u.family,
+                u.kind.as_str(),
+                u.index,
+                u.seed
+            );
+        }
+        println!("(dry run — no model calls)");
+        return Ok(());
     }
-    if !vector.flags.is_empty() {
-        println!("  flags: {}", vector.flags.join(", "));
+
+    let containment = matches!(
+        bench_sandbox::available(),
+        bench_sandbox::Containment::Seatbelt
+    );
+    if !containment {
+        eprintln!("  ! warning: no sandbox on this platform — model code runs uncontained");
     }
-    println!("  journal → {}", out.display());
+    let mut ran = 0usize;
+    for u in &todo {
+        let g =
+            bench_gen::family(&u.family).ok_or_else(|| format!("unknown family {}", u.family))?;
+        let task = task_from_generated(&g.generate(u.seed));
+        println!(
+            "→ {} {} idx={} (seed {:016x})",
+            u.family,
+            u.kind.as_str(),
+            u.index,
+            u.seed
+        );
+        let line = grade_and_line(
+            &task,
+            base_url,
+            model_name,
+            scratch_root,
+            wall_timeout_secs,
+            epoch,
+            u.kind.as_str(),
+            u.seed,
+            u.index,
+        )?;
+        println!(
+            "  score {:.3} pass={}",
+            line.oracle.score,
+            line.oracle.passed()
+        );
+        append_journal(out, &line)?;
+        ran += 1;
+    }
+    println!(
+        "epoch {epoch}: ran {ran} unit(s); journal → {}",
+        out.display()
+    );
     Ok(())
+}
+
+/// Read the resume set: the `family|kind|index` keys already recorded for `epoch`.
+fn read_done_keys(
+    out: &Path,
+    epoch: &str,
+) -> Result<std::collections::HashSet<String>, Box<dyn std::error::Error>> {
+    #[derive(Deserialize)]
+    struct DoneLine {
+        task_id: String,
+        index: u32,
+        #[serde(default)]
+        epoch: String,
+        #[serde(default)]
+        kind: String,
+    }
+    let mut done = std::collections::HashSet::new();
+    let text = match std::fs::read_to_string(out) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(done),
+        Err(e) => return Err(e.into()),
+    };
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let d: DoneLine = serde_json::from_str(line)?;
+        if d.epoch != epoch {
+            continue;
+        }
+        let family = d.task_id.split('/').next().unwrap_or(&d.task_id);
+        done.insert(format!("{}|{}|{}", family, d.kind, d.index));
+    }
+    Ok(done)
 }
 
 // ---------------------------------------------------------------------------
@@ -657,6 +860,10 @@ struct JournalLine {
     category: String,
     seed: u64,
     index: u32,
+    /// Epoch label; `"local"` for a single-unit `run`.
+    epoch: String,
+    /// `"core"` or `"probe"` (ADR-0009).
+    kind: String,
     model: ModelInfo,
     sandbox: String,
     oracle: OracleVector,

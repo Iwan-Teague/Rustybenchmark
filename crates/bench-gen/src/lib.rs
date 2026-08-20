@@ -159,6 +159,15 @@ pub fn spec_diversity(gen: &dyn Generator, upto: u64) -> usize {
     seen.len()
 }
 
+/// Every registered family id. The run protocol serves these; keep it in sync with
+/// [`family`] (a test asserts every id here resolves).
+pub const FAMILY_IDS: &[&str] = &[
+    "window-op",
+    "error-handling",
+    "stack-machine",
+    "seq-transform",
+];
+
 /// Look up a family by id.
 pub fn family(id: &str) -> Option<Box<dyn Generator>> {
     match id {
@@ -199,6 +208,17 @@ mod tests {
         let mut b = Rng::new(42);
         for _ in 0..10 {
             assert_eq!(a.next_u64(), b.next_u64());
+        }
+    }
+
+    #[test]
+    fn every_family_id_resolves() {
+        // FAMILY_IDS must not drift from the family() registry.
+        for id in FAMILY_IDS {
+            assert!(
+                family(id).is_some(),
+                "FAMILY_IDS entry {id} does not resolve"
+            );
         }
     }
 

@@ -8,6 +8,37 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Run protocol — epoch orchestration with paired-core / fresh-probe + resume (P4)
+
+First increment of the run protocol (docs/08, ADR-0009): serve a whole epoch across all families instead
+of one task at a time, resumably.
+
+- **Plan** (`bench_gen::epoch::plan_run`, pure/testable): per family, `n_core` paired-core seeds
+  `blake3(epoch ‖ family ‖ i)` (identical for every submitter, scored) + `n_probe` fresh-probe seeds
+  `blake3(probe_nonce(epoch) ‖ family ‖ i)` (the detector set, disjoint seed space). `RunUnit` carries the
+  family, `UnitKind` (Core/Probe), index and derived seed, and a `key()` for dedup.
+- **Resume** (`epoch::remaining` + `read_done_keys`): because units are idempotent (seed determines
+  instance and grade), resuming is just "skip units whose `family|kind|index` key is already journaled for
+  this epoch". Verified: seeding a journal with two done units drops them from the plan, and a different
+  epoch label rotates all core seeds and shares nothing.
+- **CLI** `rustybench run-suite --model … --epoch … [--seeds-core N] [--seeds-probe M] [--dry-run]`:
+  plans, resume-filters, then runs each remaining unit through the single-unit grade path (extracted as
+  `grade_and_line`, now shared with `run`). Journal lines gained `epoch` and `kind`. `--dry-run` prints
+  the resume-filtered plan with no model calls — how this increment is demonstrated end-to-end without a
+  server.
+- `bench_gen::FAMILY_IDS` enumerates the registry (with a drift-guard test that every id resolves), so the
+  suite serves all four families.
+
+Demonstrated: a 12-unit epoch (4 families × (2 core + 1 probe)) plans deterministically; resume skips the
+two pre-recorded units; epoch `2026-09` rotates every core seed. The only unexercised step is the live
+model call, which reuses the same `grade_and_line` path `run` already exercises. 5 new tests (run-plan +
+family-id drift); workspace 103; clippy/fmt clean.
+
+Not yet: the variance/determinism probes and calibration segments of docs/08, `status`/`resume`
+subcommands, and wiring the fresh-probe journal into the sign-test detector (needs this on real data).
+
+---
+
 ## 2026-08-20 · `bench-stats` — ICC estimation (Q29.2) + CI clamping
 
 Added the last piece of the Q29 estimation spec: intra-class correlation.
