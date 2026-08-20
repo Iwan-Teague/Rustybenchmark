@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+pub mod distance;
 pub mod window_op;
 
 /// Derive an instance seed from the epoch, task id and index (docs/02):
@@ -122,6 +123,11 @@ pub trait Generator {
     fn reference_code(&self, seed: u64) -> String;
     /// The ablated skeleton (`todo!()`). Grading it must fail.
     fn skeleton_code(&self, seed: u64) -> String;
+    /// Degenerate answers (label, code) that have the right shape but the wrong
+    /// content. Each must fail grading, or the oracle is too weak. Default: none.
+    fn trivial_baselines(&self, _seed: u64) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 /// Look up a family by id.

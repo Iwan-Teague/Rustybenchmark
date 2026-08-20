@@ -8,6 +8,50 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P3 — anti-twin distance + trivial-baseline gates
+
+**What.** The gate that actually tests the project's central claim — that
+generated instances resist memorisation — plus two more construction gates, and
+a strengthened `window-op`.
+
+`window-op` gained a fourth operation (RotateRight(k)) and a **stride** modifier
+(every window / every other window), taking the distinct-logic space from 3 to
+~16, so a seed now varies genuinely different logic. The reference-passes gate
+confirms every one of these still grades to 1.0 — a buggy new variant would have
+been caught there.
+
+`validate-family` now runs **five gates** per seed and reports the anti-twin
+distance:
+
+```
+seed 0..9: OK  determinism=true reference=1.000 skeleton_behavior=0.000 baselines_caught=true canary=true
+anti-twin (prompt+skeleton): min=0.122 median=0.433 near-twin pairs (<0.25)=7/45
+```
+
+- **Trivial-baseline gate** — `const-zero` and `identity` (right signature, wrong
+  body) must each fail. They do: the oracle is not fooled by a right-shaped
+  answer. This is the check that a family's oracle is not trivially beatable.
+- **Canary gate** — the prompt carries its per-instance canary.
+- **Anti-twin distance** (normalised token-shingle Jaccard over prompt+skeleton,
+  the R4-S4 metric): reported, not hard-gated, because a finite task space
+  eventually collides by pigeonhole. The useful signals are the *minimum*
+  distance and the near-twin count.
+
+**The measurement earns its keep immediately.** Median 0.433 says most seed-pairs
+are genuinely different tasks — the anti-memorisation property holding. But
+**7 of 45 pairs are near-twins** (min 0.122): two seeds landing on the same
+(operation, stride) produce prompts differing only in the function name. That is
+a real, quantified limitation of a ~16-variant family, and it drives a design
+conclusion the docs should absorb: **an epoch's N seeds within a family should be
+chosen (or the structural axis derived from the seed index) to guarantee N
+distinct variants**, rather than trusting independent hashing not to collide.
+The gate turned "does generation resist memorisation?" from an assertion into a
+number.
+
+47 tests across seven crates; clippy clean under `-D warnings`; fmt clean.
+
+---
+
 ## 2026-08-19 · P3 (first increment) — bench-gen: seeded solution-first generation
 
 **What.** The pivotal phase begins: tasks stop being frozen files and become

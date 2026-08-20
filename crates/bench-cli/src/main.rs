@@ -365,40 +365,102 @@ fn validate_family(
     let g = bench_gen::family(fam).ok_or_else(|| format!("unknown family `{fam}`"))?;
     println!("validate-family {fam}: {seeds} seed(s)");
     let mut failures = 0u32;
+    let mut views: Vec<String> = Vec::new();
 
     for seed in 0..seeds {
         let gt = g.generate(seed);
         let task = task_from_generated(&gt);
+        let skeleton = gt
+            .files
+            .get(Path::new(&gt.answer_path))
+            .cloned()
+            .unwrap_or_default();
+        views.push(format!("{}\n{}", gt.prompt, skeleton));
 
-        // Gate 1: determinism — same seed → byte-identical instance.
         let gt2 = g.generate(seed);
         let deterministic =
             gt.prompt == gt2.prompt && gt.files == gt2.files && gt.hidden == gt2.hidden;
 
-        // Gate 2: the reference scores 1.0 (correct by construction, ADR-0003).
-        let ref_code = g.reference_code(seed);
-        let ref_v = grade(&task, &ref_code, scratch, &format!("ref-{seed}"), 120)?;
+        let ref_v = grade(
+            &task,
+            &g.reference_code(seed),
+            scratch,
+            &format!("ref-{seed}"),
+            120,
+        )?;
 
-        // Gate 3: the skeleton fails — ablation actually removed the answer.
-        let skel_code = g.skeleton_code(seed);
-        let skel_v = grade(&task, &skel_code, scratch, &format!("skel-{seed}"), 120)?;
+        let skel_v = grade(
+            &task,
+            &g.skeleton_code(seed),
+            scratch,
+            &format!("skel-{seed}"),
+            120,
+        )?;
         let skel_behavior = skel_v.behavior.score.unwrap_or(0.0);
+
+        let mut baselines_ok = true;
+        let mut baseline_note = String::new();
+        for (label, code) in g.trivial_baselines(seed) {
+            let v = grade(&task, &code, scratch, &format!("base-{seed}-{label}"), 120)?;
+            let behav = v.behavior.score.unwrap_or(0.0);
+            if behav >= 0.999 {
+                baselines_ok = false;
+                baseline_note = format!(" <-- baseline `{label}` not caught (behavior {behav:.3})");
+            }
+        }
+
+        let canary_ok = gt.prompt.contains(&gt.canary);
 
         let ref_ok = ref_v.score >= 0.99;
         let skel_ok = skel_behavior < 0.5;
-        let all = deterministic && ref_ok && skel_ok;
+        let all = deterministic && ref_ok && skel_ok && baselines_ok && canary_ok;
         if !all {
             failures += 1;
         }
         println!(
-            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton_behavior={:.3}{}",
+            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton_behavior={:.3}{} baselines_caught={}{} canary={}",
             if all { "OK  " } else { "FAIL" },
             deterministic,
             ref_v.score,
             if ref_ok { "" } else { " <-- expected 1.0" },
             skel_behavior,
             if skel_ok { "" } else { " <-- expected <0.5" },
+            baselines_ok,
+            baseline_note,
+            canary_ok,
         );
+    }
+
+    if views.len() >= 2 {
+        let mut min = f64::INFINITY;
+        let mut all_d: Vec<f64> = Vec::new();
+        let mut near_twins = 0u32;
+        for i in 0..views.len() {
+            for j in (i + 1)..views.len() {
+                let d = bench_gen::distance::shingle_distance(
+                    &views[i],
+                    &views[j],
+                    bench_gen::distance::K,
+                );
+                min = min.min(d);
+                all_d.push(d);
+                if d < 0.25 {
+                    near_twins += 1;
+                }
+            }
+        }
+        all_d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = all_d[all_d.len() / 2];
+        println!(
+            "  anti-twin (prompt+skeleton): min={min:.3} median={median:.3} near-twin pairs (<0.25)={near_twins}/{}",
+            all_d.len()
+        );
+        if near_twins > 0 {
+            println!(
+                "  note: {near_twins} near-twin pair(s) — the family's distinct-task space is finite; \
+                 an epoch's seeds should be chosen to avoid within-family collisions."
+            );
+        }
     }
 
     let _ = std::fs::remove_dir_all(scratch);
