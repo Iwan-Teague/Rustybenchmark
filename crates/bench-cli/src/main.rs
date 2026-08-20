@@ -75,6 +75,20 @@ enum Command {
         #[arg(long, default_value = "runs/journal.jsonl")]
         journal: PathBuf,
     },
+    /// Progress, ETA and segment history for an epoch — the resume readout (docs/08).
+    Status {
+        #[arg(long, default_value = "runs/journal.jsonl")]
+        journal: PathBuf,
+        /// Epoch to report; defaults to the most recent epoch in the journal.
+        #[arg(long)]
+        epoch: Option<String>,
+        /// Paired-core seeds per family the run targets (to size the plan).
+        #[arg(long, default_value_t = 4)]
+        seeds_core: u32,
+        /// Fresh-probe seeds per family the run targets.
+        #[arg(long, default_value_t = 1)]
+        seeds_probe: u32,
+    },
     /// Run a whole epoch over every family: paired-core + fresh-probe seeds, resumable.
     RunSuite {
         #[arg(long)]
@@ -153,6 +167,12 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             journal_b,
         } => compare(&journal_a, &journal_b),
         Command::Detect { journal } => detect(&journal),
+        Command::Status {
+            journal,
+            epoch,
+            seeds_core,
+            seeds_probe,
+        } => status(&journal, epoch.as_deref(), seeds_core, seeds_probe),
         Command::RunSuite {
             model,
             model_name,
@@ -962,6 +982,149 @@ fn detect(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // ---------------------------------------------------------------------------
+// status — the resume readout
+// ---------------------------------------------------------------------------
+
+/// Read-only progress readout for an epoch: how much of the planned suite is done,
+/// an ETA for the rest from the measured steady-state pace, and the per-segment
+/// history (docs/08). This *is* the resume readout — it says exactly what a
+/// `run-suite --epoch <e>` would still have to run, without calling a model.
+fn status(
+    journal: &Path,
+    epoch: Option<&str>,
+    n_core: u32,
+    n_probe: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let records = match bench_stats::load_journal(journal) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!("no journal at {} yet — nothing has run", journal.display());
+            return Ok(());
+        }
+        Err(e) => return Err(format!("reading {}: {e}", journal.display()).into()),
+    };
+    if records.is_empty() {
+        println!("journal {} is empty — nothing has run", journal.display());
+        return Ok(());
+    }
+
+    // Which epoch: the requested one, else the most recent non-"local" epoch seen
+    // (falling back to the last record's epoch if only single-`run` units exist).
+    let epoch = match epoch {
+        Some(e) => e.to_string(),
+        None => records
+            .iter()
+            .rev()
+            .map(|r| r.epoch.as_str())
+            .find(|e| *e != "local")
+            .or_else(|| records.last().map(|r| r.epoch.as_str()))
+            .unwrap()
+            .to_string(),
+    };
+
+    // Plan vs done for this epoch (same call path `run-suite` resumes on).
+    let plan = bench_gen::epoch::plan_run(bench_gen::FAMILY_IDS, &epoch, n_core, n_probe);
+    let done_keys = read_done_keys(journal, &epoch)?;
+    let todo = bench_gen::epoch::remaining(&plan, &done_keys);
+    let planned = plan.len();
+    let remaining = todo.len();
+    let done = planned.saturating_sub(remaining);
+    let pct = if planned > 0 {
+        100.0 * done as f64 / planned as f64
+    } else {
+        0.0
+    };
+
+    let recs: Vec<bench_stats::Record> = records.into_iter().filter(|r| r.epoch == epoch).collect();
+
+    println!("status: epoch {epoch}");
+    println!(
+        "  plan      {planned} units ({} core + {} probe over {} families)",
+        n_core as usize * bench_gen::FAMILY_IDS.len(),
+        n_probe as usize * bench_gen::FAMILY_IDS.len(),
+        bench_gen::FAMILY_IDS.len(),
+    );
+    println!("  done      {done}/{planned}  ({pct:.0}%)");
+    println!("  remaining {remaining}");
+
+    // ETA from the measured steady-state pace (throughput excludes cache-warmth).
+    match bench_stats::throughput(&recs) {
+        Some(t) if t.units > 0 => {
+            let per_unit = t.wall_s / t.units as f64;
+            let warm = if t.warmup_excluded > 0 {
+                format!(", {} warmup excluded", t.warmup_excluded)
+            } else {
+                String::new()
+            };
+            println!(
+                "  pace      {per_unit:.1} s/unit (steady-state over {} timed unit(s){warm})",
+                t.units
+            );
+            if remaining > 0 {
+                println!(
+                    "  ETA       ~{} for the remaining {remaining}",
+                    fmt_duration(per_unit * remaining as f64)
+                );
+            } else {
+                println!("  ETA       complete");
+            }
+        }
+        _ => println!("  pace      n/a (no timing recorded yet)"),
+    }
+
+    // Per-segment history — the record of each run session over this epoch.
+    let mut segs: BTreeMap<Option<u32>, (usize, u64)> = BTreeMap::new();
+    for r in &recs {
+        let e = segs.entry(r.segment).or_insert((0, 0));
+        e.0 += 1;
+        e.1 += r.cost.gen_ms + r.cost.grade_ms;
+    }
+    if !segs.is_empty() {
+        println!("  segments:");
+        for (seg, (units, wall_ms)) in &segs {
+            let label = seg
+                .map(|s| format!("seg {s}"))
+                .unwrap_or_else(|| "seg —".to_string());
+            let mean = if *units > 0 {
+                *wall_ms as f64 / 1000.0 / *units as f64
+            } else {
+                0.0
+            };
+            println!("    {label}: {units} unit(s), mean {mean:.1} s/unit");
+        }
+    }
+
+    // The resume readout proper — the next units run-suite would execute.
+    if remaining > 0 {
+        let peek = remaining.min(5);
+        println!("  next up ({peek} of {remaining}):");
+        for u in todo.iter().take(peek) {
+            println!(
+                "    {:<14} {:<5} idx={} seed={:016x}",
+                u.family,
+                u.kind.as_str(),
+                u.index,
+                u.seed
+            );
+        }
+    } else {
+        println!("  → epoch complete; nothing to resume");
+    }
+    Ok(())
+}
+
+/// Humanise a duration in seconds as `Ns` / `N.Nm` / `N.Nh`.
+fn fmt_duration(secs: f64) -> String {
+    if secs < 90.0 {
+        format!("{secs:.0}s")
+    } else if secs < 5400.0 {
+        format!("{:.1}m", secs / 60.0)
+    } else {
+        format!("{:.1}h", secs / 3600.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Journal + fs
 // ---------------------------------------------------------------------------
 
@@ -1040,4 +1203,19 @@ fn append_journal(out: &Path, line: &JournalLine) -> std::io::Result<()> {
         .open(out)?;
     writeln!(f, "{}", serde_json::to_string(line)?)?;
     f.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_humanises_by_scale() {
+        // Seconds under 90s, minutes up to 90 min, hours beyond.
+        assert_eq!(fmt_duration(8.0), "8s");
+        assert_eq!(fmt_duration(89.0), "89s");
+        assert_eq!(fmt_duration(126.0), "2.1m");
+        assert_eq!(fmt_duration(3600.0), "60.0m");
+        assert_eq!(fmt_duration(7200.0), "2.0h");
+    }
 }

@@ -8,6 +8,46 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `status` — the resume readout (progress · ETA · segment history) (P4)
+
+The docs/08 CLI lists `rustybench status … # progress, ETA, segment history`; built it, and it doubles as
+the real resume readout the run protocol needs. `rustybench status --journal <j> [--epoch <e>]
+[--seeds-core N] [--seeds-probe M]` reads a journal and, for the chosen epoch (the most recent one if
+omitted), reports:
+
+- **progress** — `done / planned (%)`, computed on the *same* plan/resume path `run-suite` uses
+  (`plan_run` + `read_done_keys` + `remaining`), so the number is exactly what a resume would face, not a
+  re-derivation that could drift;
+- **ETA** — `remaining × steady-state s/unit`, where the pace comes from `bench_stats::throughput`, i.e.
+  with the cache-warmth exclusion applied — so a resumed run's cold lead unit doesn't inflate the estimate;
+- **segment history** — units and mean s/unit per run session (`seg 0`, `seg 1`, … or `seg —` for
+  pre-segment journals);
+- **next up** — the first few units `run-suite` would actually execute next (the resume readout proper).
+
+Live on the smoke journal (`runs/clean.jsonl`, a pre-segment 4-family run) reprojected onto today's 9
+families at the default 4 core / 1 probe:
+
+```
+status: epoch clean-2026-08
+  plan      45 units (36 core + 9 probe over 9 families)
+  done      12/45  (27%)
+  pace      3.8 s/unit (steady-state over 12 timed unit(s))
+  ETA       ~2.1m for the remaining 33
+  segments:
+    seg —: 12 unit(s), mean 3.8 s/unit
+  next up (5 of 33): window-op core idx=2 …
+```
+
+And on a synthetic two-segment journal the ETA tracks the *steady-state* pace (1.0 s/unit) rather than the
+warmup-inflated segment mean (34 s/unit) — the whole point of recording `segment_position`. Honest scope
+note: docs/08 keys `status` on a `run_id`, but there is no persisted run-state store yet, so it is keyed on
+`--journal`/`--epoch` like every other command here; the readout is identical in substance. A `fmt_duration`
+unit test pins the s/m/h humanisation. 139 workspace tests (+1); clippy `-D warnings` and
+`cargo fmt --check` clean. That closes the run-protocol-depth items from the overnight brief
+(`segment_position`, cache-warmth exclusion, `status`, resume readout).
+
+---
+
 ## 2026-08-20 · Run protocol depth — `segment_position` + the cache-warmth throughput exclusion (P4)
 
 Closed the docs/08 refinement flagged as future work in the throughput entry below: *"Exclude the first
