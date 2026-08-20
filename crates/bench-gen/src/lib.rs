@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+pub mod bit_manipulation;
 pub mod distance;
 pub mod epoch;
 pub mod error_handling;
@@ -170,6 +171,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "seq-transform",
     "grid-reduce",
     "trait-impl",
+    "bit-ops",
 ];
 
 /// Look up a family by id.
@@ -181,6 +183,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "seq-transform" => Some(Box::new(seq_transform::SeqTransformFamily)),
         "grid-reduce" => Some(Box::new(grid_reduce::GridReduceFamily)),
         "trait-impl" => Some(Box::new(traits_generics::TraitsGenericsFamily)),
+        "bit-ops" => Some(Box::new(bit_manipulation::BitManipulationFamily)),
         _ => None,
     }
 }
@@ -259,6 +262,11 @@ mod tests {
         // trait-impl = 4 keep predicates x 5 reductions.
         assert_eq!(
             spec_diversity(family("trait-impl").unwrap().as_ref(), 4000),
+            20
+        );
+        // bit-ops = 5 masks x 4 transforms.
+        assert_eq!(
+            spec_diversity(family("bit-ops").unwrap().as_ref(), 4000),
             20
         );
     }

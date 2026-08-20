@@ -8,6 +8,44 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Seventh family: `bit-ops` (category `bit-manipulation`)
+
+More corpus breadth (roadmap P7), and a deliberately *low-level* shape — no arithmetic fold anywhere. The
+model implements `fn f(x: u32) -> u32` as a seed-selected two-stage bit pipeline: a **mask** (Identity /
+KeepLow(n) / KeepHigh(n) / ClearLow(n) / SetLow(n)) then a **transform** (RotateLeft(k) / RotateRight(k) /
+ReverseBits / SwapBytes). 5 × 4 = **20 distinct skills**; the width `n` (∈ {8,16,24}) and rotate amount `k`
+(∈ 1..=31) are constant parameters of the same skill (Q31), excluded from `spec_signature` along with the
+function name.
+
+Solution-first / correct-by-construction (ADR-0003): native `eval` and the emitted reference use the same
+`u32` methods (`rotate_left`, `reverse_bits`, `swap_bytes`, mask arithmetic); the differential fuzzes 3000
+random `u32`. No overflow is reachable — every shift amount is < 32 and the bit ops wrap by definition,
+which is the clean answer to the differential-overflow pitfall (docs/17) that the arithmetic families have
+to bound their inputs against.
+
+The trivial baselines are `identity` (returns `x`) and `const-zero` (returns `0`). They are caught on
+*every* seed by a structural argument, pinned as a test: every transform is a **bijection that fixes zero**,
+and no mask can zero the canonical input `0x9ABCDEF1` (it has a set bit in both the lowest and highest
+positions), so the canonical result is provably never `0` and never equal to `x`.
+
+**This family is textually healthy where the pinned-interface families are not** — a useful contrast with
+yesterday's `trait-impl`/`stack-machine` entries. Because the solution is a short two-line function whose
+*text* genuinely changes with the op (`rotate_left(7)` vs `swap_bytes()` share almost nothing), both text
+proxies are high, not just the spec count:
+
+```
+view       min=0.392 median=0.500 near-twins 0/28
+reference  min=0.400 median=0.750 near-twins 0/28   capacity=45
+spec-diversity: 20 distinct skills
+```
+
+So the anti-memorisation numbers agree with each other here (view, reference *and* spec all comfortably
+clear the floor), which they do **not** for a family whose fixed scaffolding dominates the text. Registered
+in `FAMILY_IDS` and the `spec_diversity` pin (== 20) in the same commit. 125 workspace tests (+6);
+`validate-family --seeds 8` all gates green; clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-20 · Sixth family: `trait-impl` (category `traits-generics`) — first uncovered core category
 
 Growing the corpus (roadmap P7, the long pole). The five existing families cover `borrow-lifetimes`,
