@@ -20,6 +20,7 @@ pub mod distance;
 pub mod dual_region;
 pub mod epoch;
 pub mod error_handling;
+pub mod generic_select;
 pub mod grid_reduce;
 pub mod seq_transform;
 pub mod stack_machine;
@@ -178,6 +179,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "raw-ptr",
     "str-transform",
     "dual-region",
+    "generic-select",
 ];
 
 /// Look up a family by id.
@@ -193,6 +195,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "raw-ptr" => Some(Box::new(unsafe_core::UnsafeCoreFamily)),
         "str-transform" => Some(Box::new(string_processing::StringProcessingFamily)),
         "dual-region" => Some(Box::new(dual_region::DualRegionFamily)),
+        "generic-select" => Some(Box::new(generic_select::GenericSelectFamily)),
         _ => None,
     }
 }
@@ -292,6 +295,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("dual-region").unwrap().as_ref(), 4000),
             12
+        );
+        // generic-select = 4 selects x 4 projections (a second traits-generics family).
+        assert_eq!(
+            spec_diversity(family("generic-select").unwrap().as_ref(), 4000),
+            16
         );
     }
 }

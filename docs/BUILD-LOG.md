@@ -8,6 +8,39 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Eleventh family: `generic-select` — a *second* `traits-generics` family
+
+Deepening the second core category. `traits-generics` had only `trait-impl` (which pins a trait + driver
+and asks the model to *implement* the trait); this exercises the **sibling skill** — the model instead
+**writes a generic function bounded by** a pinned trait: `fn f<T: Ranked>(items: &[T]) -> Option<i64>`.
+Writing the `<T: Ranked>` bound and the generic body is the skill `trait-impl` does not test. It is also
+**selection-shaped, not a fold**, so it reads differently from the reduce/pipeline families.
+
+Seed-selected on **select** (Max / Min / First / Last — which item's `rank()`) × **project** (Identity /
+Abs / Double / Square — how the chosen rank is transformed) = **16 distinct skills**; `None` iff empty.
+Correct-by-construction (ADR-0003): native `eval` and the emitted reference are mirrored, and the
+differential builds `Vec<R>` for a hidden `R: Ranked` and fuzzes 3000 slices against a free reference over
+the raw ranks; ranks bounded so `Square` can't overflow. `validate-family --seeds 8`, all gates green:
+
+```
+reference=1.000  skeleton_behavior=0.000  baselines_caught=true  canary=true  determinism=true
+view       min=0.393 median=0.489 near-twins 0/28
+reference  min=0.154 median=0.326 near-twins 9/28   capacity=4
+spec-diversity: 16 distinct skills
+```
+
+Both trivial baselines are constants — `const-none` (always `None`) and `const-zero` (always `Some(0)`) —
+caught on every seed because the canonical ranks `[3, 7, 2, 5]` yield `Some(v)` with `v` neither `None` nor
+`0` under all 16 combos (pinned test). Same honest pinned-interface caveat as `trait-impl`: reference-
+capacity is **4** (the trait + generic-fn scaffolding dominates the short body), while spec-diversity (16,
+the authoritative gate) and view-distance (0 near-twins) both clear the bar.
+
+`traits-generics` now has **2 of its 40** families, testing its two complementary halves (implement a
+trait; consume one generically). Two core categories now sit at 2 families each (`borrow-lifetimes`,
+`traits-generics`). 151 workspace tests (+6); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Tenth family: `dual-region` — a *second* `borrow-lifetimes` family
 
 With the tractable categories covered, the next corpus goal is deepening the core categories toward their
