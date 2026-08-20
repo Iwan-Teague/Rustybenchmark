@@ -18,6 +18,7 @@ use std::path::PathBuf;
 pub mod distance;
 pub mod epoch;
 pub mod error_handling;
+pub mod stack_machine;
 pub mod window_op;
 
 /// Derive an instance seed from the epoch, task id and index (docs/02):
@@ -162,6 +163,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
     match id {
         "window-op" => Some(Box::new(window_op::WindowOpFamily)),
         "error-handling" => Some(Box::new(error_handling::ErrorHandlingFamily)),
+        "stack-machine" => Some(Box::new(stack_machine::StackMachineFamily)),
         _ => None,
     }
 }
@@ -202,7 +204,8 @@ mod tests {
     fn spec_diversity_is_the_structural_count() {
         // The honest, ungameable task-diversity ceiling (Q31): distinct structural
         // specs, constants excluded. window-op = 6 ops x 2 strides; error-handling
-        // = 5 combines x 6 rule-types. Pinned so narrowing a surface fails loudly.
+        // = 5 combines x 6 rule-types; stack-machine = 5 combines x 4 maps x 2
+        // reorders. Pinned so narrowing a surface fails loudly.
         assert_eq!(
             spec_diversity(family("window-op").unwrap().as_ref(), 4000),
             12
@@ -210,6 +213,10 @@ mod tests {
         assert_eq!(
             spec_diversity(family("error-handling").unwrap().as_ref(), 4000),
             30
+        );
+        assert_eq!(
+            spec_diversity(family("stack-machine").unwrap().as_ref(), 4000),
+            40
         );
     }
 }

@@ -8,6 +8,40 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Third family: `stack-machine` (category `pattern-matching`)
+
+A third family in a new category, to keep testing whether solution-first generation generalises and to
+cover a genuinely different Rust skill: an **exhaustive `match` over a provided enum** driving a
+`Vec<i64>` stack. The model implements `run(program: &[Op]) -> Vec<i64>`; the `Combine` / `Map` /
+`Reorder` operations have seed-selected semantics described in the prompt (5 × 4 × 2). Native `eval` and
+the emitted reference are mirrored; the differential fuzzes 3000 random programs; the two baselines
+(`const-empty`, `echo-pushes`) are both caught.
+
+`validate-family --seeds 8` — all five construction gates green on every seed (reference 1.000, skeleton
+fails, baselines caught, canary, determinism). Numbers:
+
+```
+view       min=0.349 median=0.453 near-twins 0/28
+reference  min=0.000 median=0.207 near-twins 16/28   capacity=2
+spec-diversity: 40 distinct skills
+distinct-skills epoch: served 8 covering 8 distinct skills
+```
+
+**A recorded surprise that further validates Q31.** I built this family expecting *more* solution
+diversity than `error-handling` (whose reference-capacity was 7). On the authoritative measure it has it
+— **spec-diversity 40, the highest of the three**. But its *reference*-capacity came out **2**, *lower*
+than error-handling's 7, because the fixed `match`/loop scaffolding dominates the solution text even more
+than the parse-plumbing did. So the family with the *most* skills has the *lowest* reference-distance
+proxy — a third, independent confirmation that reference-distance is a poor diversity measure and that
+spec-diversity (the decided gate, Q31) is the right one. Left the honest number in the module doc rather
+than tuning the family to make a misleading proxy look better.
+
+Three families now span three categories (borrow-lifetimes, error-handling, pattern-matching) and three
+distinct task shapes; solution-first generation holds for all three. 71 workspace tests; clippy/fmt
+clean.
+
+---
+
 ## 2026-08-20 · Epoch sampler serves distinct *skills* (Q31 follow-on)
 
 The Q31 decision left one piece unbuilt: the epoch sampler served on view-distance, which post-finding is
