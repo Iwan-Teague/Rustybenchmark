@@ -57,6 +57,12 @@ enum Command {
         #[arg(long, default_value = "runs/validate")]
         scratch: PathBuf,
     },
+    /// Aggregate a graded journal into capability/pass-rate and cluster-bootstrap CIs.
+    Stats {
+        /// Path to a JSONL journal written by `run`.
+        #[arg(long, default_value = "runs/journal.jsonl")]
+        journal: PathBuf,
+    },
 }
 
 /// Everything needed to grade one task, from either source.
@@ -104,6 +110,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             seeds,
             scratch,
         } => validate_family(&family, seeds, &scratch),
+        Command::Stats { journal } => stats(&journal),
     }
 }
 
@@ -528,6 +535,57 @@ fn validate_family(
     } else {
         Err(format!("{failures} seed(s) failed validation").into())
     }
+}
+
+// ---------------------------------------------------------------------------
+// stats
+// ---------------------------------------------------------------------------
+
+fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let records = bench_stats::load_journal(journal)
+        .map_err(|e| format!("reading {}: {e}", journal.display()))?;
+    if records.is_empty() {
+        return Err(format!("no graded units in {}", journal.display()).into());
+    }
+    let r = bench_stats::report(&records);
+
+    println!(
+        "capability_score = {:.3}  [{:.3}, {:.3}]  (95% overall CI, cluster bootstrap)",
+        r.capability_score, r.capability_ci.0, r.capability_ci.1
+    );
+    println!(
+        "pass_rate        = {:.3}  over {} units in {} categor{}",
+        r.pass_rate,
+        r.units,
+        r.categories.len(),
+        if r.categories.len() == 1 { "y" } else { "ies" }
+    );
+    println!(
+        "per-category (simultaneous CIs at 1 - 0.05/{}):",
+        r.simultaneous_k
+    );
+    for c in &r.categories {
+        println!(
+            "  {:<18} score={:.3} [{:.3}, {:.3}]  pass={:.3}  fams={} units={}{}",
+            c.category,
+            c.mean_score,
+            c.score_ci.0,
+            c.score_ci.1,
+            c.pass_rate,
+            c.families,
+            c.units,
+            if c.directional_only {
+                "  <-- directional-only (too few families)"
+            } else {
+                ""
+            },
+        );
+    }
+    println!(
+        "note: family-level cluster bootstrap ({} resamples) — a lower bound on CI width until shapes are labelled (Q24).",
+        r.bootstrap_iters
+    );
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

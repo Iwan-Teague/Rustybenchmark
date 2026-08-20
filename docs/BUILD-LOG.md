@@ -8,6 +8,39 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `bench-stats` — journal → capability, pass-rate, cluster-bootstrap CIs (P4)
+
+With Q28/Q29 decided, built the crate they unblocked. `bench-stats` reads a JSONL journal and computes,
+exactly per [07-statistics.md](07-statistics.md):
+
+- **`capability_score`** = equal-weight mean of the per-category means (docs/04), not a pooled mean — a
+  small probe category counts the same as a large core one.
+- **pass-rate** from the structural `OracleVector::passed()` (Q28), never a threshold on the score.
+- **CIs from the cluster bootstrap** (Q29): stratified family resampling (10k), the coarsest cluster
+  available until shapes are labelled (Q24), flagged as a lower bound on width. Categories below a
+  provisional family floor are marked **directional-only** (the honest home for the few-cluster
+  under-coverage). Per-category CIs are **simultaneous** — Bonferroni `1 − α/K` (Q29.4). Deterministic
+  RNG so the same journal yields the same CI.
+
+Wired as `rustybench stats --journal <path>`. End-to-end on a synthetic 6-unit / 2-category journal:
+
+```
+capability_score = 0.610  [0.300, 0.765]  (95% overall CI, cluster bootstrap)
+pass_rate        = 0.333  over 6 units in 2 categories
+  borrow-lifetimes   score=0.507 [0.000, 0.760]  pass=0.333  fams=2 units=3  <-- directional-only
+  error-handling     score=0.713 [0.600, 0.770]  pass=0.333  fams=2 units=3  <-- directional-only
+```
+
+The pass predicate visibly discriminates on real-shaped data: a behaviour-1.0 unit that failed the
+allocation constraint, and one that used `unsafe` over budget, both correctly count as **not passed** —
+the clone-everything case caught structurally, not by weighting. 8 crate tests; workspace 87; clippy/fmt
+clean.
+
+Not yet: the wild cluster bootstrap, shape-level resampling (Q24), ICC estimation, and the paired
+McNemar / sign-test detectors — this increment is the load-bearing path those extend.
+
+---
+
 ## 2026-08-20 · Q28 + Q29 decided — the pass predicate and the estimation spec
 
 Worked through the two blocking statistical questions with the user and wrote the decisions into code and
