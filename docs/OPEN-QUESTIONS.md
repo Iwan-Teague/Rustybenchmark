@@ -47,13 +47,41 @@ Open: can we get a usable yield restricted to *small* commits (3–10 files, **�
 
 ---
 
-## Q3 — How much does `Spec` need to carry per category?
+## Q3 — How much does `Spec` need to carry per category? · **PARTLY RESOLVED (2 families measured)**
 
 **Blocks:** Phase 3.
 
 `borrow-lifetimes` has an obvious structural parameterisation. `error-handling` and `idiom-refactor` are less obvious — what is the structural axis that a seed varies? Risk: some categories reduce to cosmetic variation and fail the `min_instance_distance` gate.
 
 Mitigation to test in Phase 3: author one family in a *hard* category (suggest `idiom-refactor`) alongside the exemplar, specifically to find out whether the pattern generalises or whether some categories need a different generation strategy.
+
+**Measured 2026-08-19 — two families of deliberately different shape ([BUILD-LOG](BUILD-LOG.md)).**
+Answer: **seeding generalises in correctness but not automatically in variance.**
+
+`borrow-lifetimes` (in-place mutation) and `error-handling` (parse → validate → `Result` with `?`)
+both pass all five construction gates on every seed, including the load-bearing
+reference-passes-its-own-oracle self-consistency check. So solution-first generation (ADR-0003) is not
+specific to the tidy exemplar; a genuinely different-shape category produces correct-by-construction
+instances too. That half of Q3 is settled.
+
+The anti-twin measurement splits them:
+
+| family | median prompt+skeleton distance | near-twins (<0.25) |
+|---|---|---|
+| `borrow-lifetimes` | 0.433 | 7/45 |
+| `error-handling` | **0.263** | **18/45** |
+
+`error-handling` instances are markedly more similar — median barely above the near-twin floor. The
+cause is structural, not a generator defect: the shared boilerplate (the pinned error enum, the
+parse-propagate skeleton, the forbidden-API constraint list — see [04](04-categories.md) "tests
+plumbing, not error design") dominates the prompt, so the seed-varied fraction of what the model sees
+is small. A family whose fixed scaffolding is large relative to its variable surface lands near-twin
+*even when all four variance axes are exercised*.
+
+**Consequence for the 272-family plan:** variance must be designed for per family, not assumed from
+seeding. The `validate-family` gate already detects the problem in CI; which prevention lever the
+corpus adopts (a per-category floor vs. a mandate to enlarge the variable surface) is the remaining
+open part, tracked as **Q30**.
 
 ---
 
@@ -402,3 +430,36 @@ Four things `bench-stats` is specified to compute have no specification:
 4. **Multiplicity.** No correction anywhere, against 11 category scores plus model-vs-model comparisons. Family-wise error rate on the radar chart alone: **94–99%**.
 
 Additionally the percentile cluster bootstrap **under-covers at every per-category cluster count** — 92% at a core category, 84% at `idiom-refactor` — against a nominal 95%.
+
+---
+
+## Q30 — Anti-twin variance is per-family, not global
+
+**Blocks:** Phase 3 corpus authoring — the `min_instance_distance` each family must clear. Raised by
+the two-family measurement in **Q3** / [BUILD-LOG](BUILD-LOG.md).
+
+Inter-instance distance depends heavily on how much fixed scaffolding a family carries. `error-handling`
+sits at median 0.263 with 18/45 near-twin pairs against `borrow-lifetimes`' 0.433 / 7-of-45, purely
+because a pinned error enum plus a parse-propagate skeleton is most of what the model sees. A single
+global `min_instance_distance = 0.25` therefore means very different things across categories:
+comfortable headroom for a low-scaffold family, a knife-edge for a high-scaffold one.
+
+Undecided — which lever, or both:
+
+1. **Per-category floor.** Set `min_instance_distance` per category — higher where scaffolding is
+   naturally small, lower (with written justification) where the fixed public interface is
+   intentionally large. Risk: a low floor licenses genuinely memorisable families.
+2. **Force variable surface.** Keep one global floor and require scaffolding-heavy families to enlarge
+   their seed-varied surface — more combine ops, more validation rules, deeper composition — until they
+   clear it. Risk: inflates authoring cost for exactly the categories already hard to parameterise
+   (`error-handling`, `idiom-refactor`).
+
+Second-order problem the measurement also exposed: within a single epoch's *N* paired-core seeds,
+nothing currently *guarantees* *N* structurally distinct draws. A finite variant space can collide,
+producing near-twins inside one run regardless of the family's average distance. A distance-aware epoch
+sampler — reject a candidate seed too close to an already-chosen sibling — fixes that independently of
+the floor decision.
+
+Decide before authoring beyond the two exemplar families. The gate already *detects* the problem in CI
+(`validate-family` reports min/median distance and near-twin count); this question is which prevention
+strategy the corpus adopts.

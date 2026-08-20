@@ -202,6 +202,23 @@ struct Spec {
 
 Vary all four axes. A generator that only permutes identifiers is memorisable after a handful of instances and must fail CI via `min_instance_distance`.
 
+### Varying the four axes is necessary, not sufficient
+
+Two families built and measured in Phase 3 ([BUILD-LOG](BUILD-LOG.md), [Q3](OPEN-QUESTIONS.md)) show
+that exercising all four axes does not by itself buy distance. `error-handling` varies structure,
+naming, numerics and API surface and still lands at median prompt+skeleton distance **0.263 with 18/45
+near-twin pairs**, versus `borrow-lifetimes`' **0.433 / 7-of-45**. The difference is scaffolding: when
+the fixed part of a family — a pinned error enum, a parse-propagate skeleton, a forbidden-API list — is
+large relative to the seed-varied part, the instances the model *sees* are close even though the four
+axes all move underneath.
+
+So variance is a property to **measure per family**, not one that seeding guarantees, and two things
+follow. First, `validate-family` reports each family's min/median distance and near-twin count, and a
+family that clears `min_instance_distance` *on average* can still contain near-twin pairs — the mean is
+not the gate. Second, whether the fix is a per-category floor or a mandate to enlarge the variable
+surface is open ([Q30](OPEN-QUESTIONS.md)); until it is decided, a scaffolding-heavy family must be
+inspected on its near-twin count, not waved through on its median.
+
 ## Generator validation (CI, ≥1000 seeds per family)
 
 Every one of these is a hard gate. A family that fails any of them does not ship.

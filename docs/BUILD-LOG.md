@@ -8,6 +8,30 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · Folded the Q3 variance finding into the design docs
+
+The second-family measurement (below) produced a design-level conclusion that lived only in this build
+log. Promoted it into the durable specs so the 272-family plan carries it:
+
+- **[Q3](OPEN-QUESTIONS.md)** marked *partly resolved*. Records the settled half — solution-first
+  seeding generalises in **correctness** across two different-shape families (both pass all five
+  construction gates on every seed) — and the unsettled half: it does **not** generalise automatically
+  in **variance**. Carries the distance table (`borrow-lifetimes` 0.433 / 7-of-45 vs `error-handling`
+  0.263 / 18-of-45).
+- **[Q30](OPEN-QUESTIONS.md)** opened for the mechanism the finding leaves undecided: anti-twin
+  variance is per-family, not global, so a single `min_instance_distance` means different things across
+  categories. Two prevention levers stated (per-category floor vs. forced variable surface), plus the
+  second-order epoch-seed-collision problem and its fix (a distance-aware epoch sampler).
+- **[02-task-format.md](02-task-format.md)** gained "Varying the four axes is necessary, not
+  sufficient" — the rule that variance is measured per family, and that clearing the floor *on average*
+  does not clear it *pairwise*.
+- **[04-categories.md](04-categories.md)** notes that pinning the error enum makes `error-handling`
+  correct-by-construction but naturally low-variance, cross-linking Q3/Q30.
+
+No code changed; `bench-invariants` still green (the edits are prose, not stats-table cells).
+
+---
+
 ## 2026-08-19 · P3 — second family (`error-handling`): seeding generalises, and two oracle bugs it caught
 
 **The question this answers.** The docs' biggest open risk (Q3, R2-S6): does

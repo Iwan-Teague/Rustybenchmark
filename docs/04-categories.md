@@ -170,6 +170,13 @@ The honest consequence: choosing a good error taxonomy — arguably the most int
 Rust error handling — **is not gradeable by this oracle and is out of scope**. A rename to
 `error-plumbing` is worth considering for accuracy. See [REVIEW-3.md](REVIEW-3.md) R3-S4.
 
+Pinning the enum has a measured side effect on **variance**. Because the given enum and the fixed
+plumbing shape are most of what the model sees, `error-handling` instances sit close together — median
+inter-instance distance **0.263** against `borrow-lifetimes`' **0.433**, near the near-twin floor
+(measured on the two Phase-3 exemplar families, [BUILD-LOG](BUILD-LOG.md)). The category is
+correct-by-construction but naturally low-variance; how the corpus plan compensates — a per-category
+distance floor or a larger seed-varied surface — is [Q3](OPEN-QUESTIONS.md) / [Q30](OPEN-QUESTIONS.md).
+
 ## Per-category oracle weights
 
 The global default (`behavior 0.70 / constraint 0.20 / quality 0.10`) is **wrong for several categories** and is overridable per category and per family.
