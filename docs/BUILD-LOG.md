@@ -8,6 +8,34 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Refreshed the authoring guide (doc 17) with the families and lessons
+
+The roadmap calls authoring ergonomics "the highest-leverage work in the project" (an hour spent here pays
+back ~270 times). [Doc 17](17-authoring-families.md) had drifted badly — it still opened with "Three
+reference families" and named only `window_op`/`error_handling`/`stack_machine`, when there are now
+**eleven**. Rewrote it around what the last week actually taught:
+
+- **Archetype table.** The eleven families grouped into five shapes (seed-selected pipeline; in-place +
+  alloc constraint; pinned interface; provided-enum match; signature-forced) with the canonical family to
+  copy for each — so a contributor picks the nearest template by *shape*, not by reading all eleven.
+- **A new "trivial baselines" section** capturing the trap I hit in four families this session: a *shaped*
+  baseline (return the sum / the length / the first element) coincides with exactly one real spec and then
+  passes on that seed. The fix — Vec output uses `identity`/`empty`; scalar/`Option` output uses two
+  spec-independent constants with a canonical proven to avoid them, pinned by a test — is now written down.
+- **"Forcing the skill through the signature"** — `raw_ptr` (unsafe unavoidable) and `trait_impl`
+  (associated-type/signature match), with the honest miri caveat.
+- **The reference-capacity reality**, measured across all families: pinned-interface families sit at 1–7
+  (scaffolding dominates the solution text) while short-body families reach 45–56, so reference-distance is
+  a diagnostic and `spec_diversity` is the gate — with the actual numbers in the doc.
+- **A pitfall for clippy on generator code** (`enum_variant_names`, `needless_range_loop`,
+  `unnecessary_literal_unwrap` all fired on first cuts), plus the register-in-three-places drift-guard.
+
+Docs only — `bench-invariants` parses docs 04/07/09, not 17, so no table-arithmetic test is affected; the
+workspace stays at 151 tests, clippy/fmt clean. This is the G3 lever kept current while the lessons are
+fresh, rather than re-derived by the next author.
+
+---
+
 ## 2026-08-21 · Eleventh family: `generic-select` — a *second* `traits-generics` family
 
 Deepening the second core category. `traits-generics` had only `trait-impl` (which pins a trait + driver
