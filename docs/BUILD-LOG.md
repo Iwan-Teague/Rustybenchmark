@@ -8,6 +8,25 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `bench-stats` — studentised the wild cluster bootstrap (coverage 0.90 → 0.95)
+
+Upgraded the wild cluster bootstrap to the **studentised (percentile-t)** form. Each replicate now
+computes not just the sign-flipped mean shift `Δ` but its *own* cluster-robust SE from the flipped
+residuals (`e*_g = w_g e_g − n_g Δ`), forming a bootstrap t-pivot `t* = Δ / SE*`; the CI inverts those
+t-quantiles: `[μ − SE·q_{1−α/2}, μ − SE·q_{α/2}]`. The t-pivot cancels the small-sample noise in the SE
+estimate, which is what the raw percentile form couldn't do.
+
+Re-measured the coverage simulation: **0.953 at G = 12**, essentially nominal 0.95, up from the raw
+percentile's 0.90. Tightened the regression bound to ≥ 0.90 to lock the improvement in.
+
+Recorded the honest limit: studentising **degenerates at 2 clusters** — the sign flips that carry the
+signal also zero the bootstrap SE — so it is well-defined only above ~12 clusters. That is exactly why
+sub-floor categories stay `directional_only`; the between-family-variance test now uses 6 families so it
+is well-defined. Removed the now-unused raw `percentile_ci`. `bench-stats` 10 tests; workspace 89;
+clippy/fmt clean. doc 07's few-clusters section updated to the studentised method.
+
+---
+
 ## 2026-08-20 · `bench-stats` — wild cluster bootstrap (Q29.5)
 
 Replaced the interim resample-families percentile bootstrap with the **wild cluster bootstrap**

@@ -326,10 +326,15 @@ is valid for it; it is **directional-only, never ranked**, until Q24 gives it an
 ### Few clusters: wild cluster bootstrap
 
 The naive percentile cluster bootstrap **under-covers when clusters are few** — simulated 92% at a core
-category and 84% at `idiom-refactor`, against a nominal 95%. Use the **wild cluster bootstrap**
-(Cameron–Gelbach–Miller), which holds coverage down to ~12–15 clusters, and **validate coverage by
-simulation** before publishing. Any category below a cluster-count floor (fixed at the shape audit) is
-**directional-only, not ranked** — the honest home for `idiom-refactor` and any few-shape category.
+category and 84% at `idiom-refactor`, against a nominal 95%. Use the **studentised (percentile-t) wild
+cluster bootstrap** (Cameron–Gelbach–Miller): Rademacher sign-flips on the per-family residual sums, with
+each replicate carrying its own cluster-robust SE so the interval inverts bootstrap t-quantiles rather
+than raw percentiles — the t-pivot is what cancels the small-sample SE noise and restores coverage.
+Implemented in `bench-stats` and **validated by simulation**: measured **0.95 coverage at 12 clusters**,
+versus 0.90 for the un-studentised percentile form. It holds down to ~12–15 clusters; below that it
+degenerates (at 2 clusters the sign flips that carry the signal also zero the bootstrap SE), which is why
+any category below a cluster-count floor (fixed at the shape audit) is **directional-only, not ranked** —
+the honest home for `idiom-refactor` and any few-shape category.
 
 ### ICC: estimated, clamped, diagnostic-only
 
