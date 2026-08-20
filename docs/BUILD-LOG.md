@@ -8,6 +8,35 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `bench-stats` — ICC estimation (Q29.2) + CI clamping
+
+Added the last piece of the Q29 estimation spec: intra-class correlation.
+
+- **Estimator**: one-way random-effects ICC(1) from unbalanced ANOVA components
+  (`icc_components` + `icc_from`), **clamped to [0,1]**. Returns `None` when not estimable — fewer than
+  two families, or one seed per family (no within-family df to separate the two variance components).
+- **Pooled + shrink**: a pooled ICC is formed by summing components across categories (families compared
+  within their own category, so category effects cancel); each category's raw ICC is then
+  **empirical-Bayes-shrunk** toward it by between-family df (`w = df_b/(df_b+τ)`, τ provisional). The
+  shrink target falls back to the canonical `bench_invariants::ICC` (0.3) when nothing is estimable —
+  single source of truth for the design assumption.
+- **Diagnostic only**: `icc` and its derived `design_effect = 1+(m−1)·ICC` (floored at 1) are reported
+  per category and pooled, but are **never** inputs to a CI — a bad or negative ICC cannot narrow a
+  published interval, which was the Q29.2 failure mode. `validate` this via the code path: CIs come from
+  the bootstrap, ICC sits beside them.
+- **CI clamping**: scores/means/pass-rates live in [0,1] and the pass-rate difference in [-1,1], so a
+  studentised percentile-t interval that overshoots the boundary (which it can near a boundary or with
+  very few clusters) is reported as its intersection with the feasible set. A 2-family category now shows
+  `[0.000, 1.000]` (maximally uncertain, and flagged directional-only) rather than a nonsensical
+  `[-0.507, 1.520]`.
+
+`stats` now prints per-category `icc`/`de` and a pooled-ICC line. Tests cover pure-between (ICC=1),
+pure-within (ICC=0), and not-estimable (one seed per family → None). 19 crate tests (+4); workspace 98;
+clippy/fmt clean. The stats layer's remaining gaps are both Q24-gated: shape-level resampling and
+`icc_within_shape`.
+
+---
+
 ## 2026-08-20 · `bench-stats` — paired McNemar + precomputation sign test
 
 Added the two paired detectors from the Q29 decisions, plus the exact binomial-tail engine both need.

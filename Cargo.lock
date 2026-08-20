@@ -148,6 +148,7 @@ name = "bench-stats"
 version = "0.0.1"
 dependencies = [
  "bench-core",
+ "bench-invariants",
  "serde",
  "serde_json",
 ]

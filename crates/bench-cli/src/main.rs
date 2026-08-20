@@ -576,8 +576,16 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
         r.simultaneous_k
     );
     for c in &r.categories {
+        let icc = c
+            .icc
+            .map(|i| format!("icc={i:.2}"))
+            .unwrap_or_else(|| "icc=n/a".to_string());
+        let de = c
+            .design_effect
+            .map(|d| format!(" de={d:.2}"))
+            .unwrap_or_default();
         println!(
-            "  {:<18} score={:.3} [{:.3}, {:.3}]  pass={:.3}  fams={} units={}{}",
+            "  {:<18} score={:.3} [{:.3}, {:.3}]  pass={:.3}  fams={} units={}  {icc}{de}{}",
             c.category,
             c.mean_score,
             c.score_ci.0,
@@ -591,6 +599,12 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 ""
             },
         );
+    }
+    match r.pooled_icc {
+        Some(icc) => {
+            println!("pooled ICC = {icc:.3} (diagnostic/sizing only, not in any CI — Q29.2)")
+        }
+        None => println!("pooled ICC = n/a (needs >=2 families with >=2 seeds each to estimate)"),
     }
     println!(
         "note: family-level cluster bootstrap ({} resamples) — a lower bound on CI width until shapes are labelled (Q24).",

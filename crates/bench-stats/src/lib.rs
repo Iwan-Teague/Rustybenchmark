@@ -24,10 +24,15 @@
 //!   family-clustered wild-bootstrap CI on the pass-rate difference; the
 //!   **precomputation detector** is the one-sided sign test on `pick-one`
 //!   core-vs-probe bits (Q29.1).
+//! - **ICC** (Q29.2) is the one-way ANOVA estimate, clamped to [0,1] and
+//!   empirical-Bayes-shrunk toward the pooled value, reported per category with its
+//!   design effect. It is **diagnostic/sizing only** — never an input to a CI, which
+//!   is why a bad or unestimable ICC cannot narrow a published interval.
 //!
-//! Not yet implemented (tracked): shape-level resampling (Q24) and ICC
-//! estimation; and the sign test is a pure statistic here — it starts running on
-//! real data once the epoch protocol emits labelled fresh-probe units (ADR-0009).
+//! Not yet implemented (tracked): shape-level resampling and `icc_within_shape`
+//! (both need the Q24 shape labels); and the sign test is a pure statistic here —
+//! it starts running on real data once the epoch protocol emits labelled
+//! fresh-probe units (ADR-0009).
 
 use bench_core::OracleVector;
 use serde::Deserialize;
@@ -249,6 +254,14 @@ fn wildcat(families: &BTreeMap<String, Vec<f64>>) -> Option<WildCat> {
     WildCat::new(&fams)
 }
 
+/// Clamp a CI to a bounded parameter's feasible range. Scores, means and pass-rates
+/// live in [0, 1], so a percentile-t interval that overshoots the boundary (which the
+/// studentised bootstrap can do near a boundary or with very few clusters) is reported as
+/// its intersection with the feasible set — the overshoot carries no extra information.
+fn clamp_ci(ci: (f64, f64), lo: f64, hi: f64) -> (f64, f64) {
+    (ci.0.clamp(lo, hi), ci.1.clamp(lo, hi))
+}
+
 /// Turn a set of bootstrap t-statistics and the point `(mu, se)` into a studentised
 /// (equal-tailed percentile-t) CI: `[μ − se·q_{1−α/2}, μ − se·q_{α/2}]`.
 fn studentized_ci(mu: f64, se: f64, mut ts: Vec<f64>, alpha: f64) -> (f64, f64) {
@@ -317,6 +330,93 @@ fn bootstrap_category(
 }
 
 // ---------------------------------------------------------------------------
+// ICC (intra-class correlation) — diagnostic / sizing only, never a CI input (Q29.2)
+// ---------------------------------------------------------------------------
+
+/// Empirical-Bayes shrinkage strength for per-category ICC: a category is trusted on its
+/// own estimate once its between-family df comfortably exceeds this. Provisional — the
+/// real value is tuned at the Q24 shape audit; the estimate feeds sizing, not any CI.
+pub const ICC_SHRINK_TAU: f64 = 4.0;
+
+/// Sufficient statistics for the one-way (families-within-a-set) ANOVA ICC. Additive
+/// across categories, which is how the pooled estimate is formed (each category
+/// contributes its between-family SS around its *own* mean, so category effects cancel).
+#[derive(Clone, Copy, Debug, Default)]
+struct IccComponents {
+    ssb: f64,    // between-family sum of squares
+    ssw: f64,    // within-family sum of squares
+    df_b: f64,   // Σ (families − 1)
+    df_w: f64,   // Σ (units − families)
+    n0_num: f64, // Σ (N − Σ n_g²/N); pooled n0 = n0_num / df_b
+}
+
+impl IccComponents {
+    fn add(&mut self, o: &IccComponents) {
+        self.ssb += o.ssb;
+        self.ssw += o.ssw;
+        self.df_b += o.df_b;
+        self.df_w += o.df_w;
+        self.n0_num += o.n0_num;
+    }
+}
+
+fn icc_components(families: &BTreeMap<String, Vec<f64>>) -> IccComponents {
+    let k = families.len();
+    let n_total: usize = families.values().map(|f| f.len()).sum();
+    if n_total == 0 {
+        return IccComponents::default();
+    }
+    let grand = families.values().flatten().sum::<f64>() / n_total as f64;
+    let mut ssb = 0.0;
+    let mut ssw = 0.0;
+    let mut sum_nsq = 0.0;
+    for f in families.values() {
+        let ng = f.len();
+        if ng == 0 {
+            continue;
+        }
+        let gm = f.iter().sum::<f64>() / ng as f64;
+        ssb += ng as f64 * (gm - grand).powi(2);
+        for &y in f {
+            ssw += (y - gm).powi(2);
+        }
+        sum_nsq += (ng * ng) as f64;
+    }
+    IccComponents {
+        ssb,
+        ssw,
+        df_b: (k as f64 - 1.0).max(0.0),
+        df_w: (n_total as f64 - k as f64).max(0.0),
+        n0_num: n_total as f64 - sum_nsq / n_total as f64,
+    }
+}
+
+/// The one-way random-effects ICC(1) from ANOVA components, clamped to [0, 1].
+/// `None` when it is not estimable: fewer than two families (no between df) or no
+/// within-family replication (no within df — one seed per family cannot separate the
+/// two variance components).
+fn icc_from(c: &IccComponents) -> Option<f64> {
+    if c.df_b < 1.0 || c.df_w < 1.0 {
+        return None;
+    }
+    let msb = c.ssb / c.df_b;
+    let msw = c.ssw / c.df_w;
+    let n0 = c.n0_num / c.df_b;
+    let denom = msb + (n0 - 1.0) * msw;
+    if denom.abs() < SE_EPS {
+        return Some(0.0);
+    }
+    Some(((msb - msw) / denom).clamp(0.0, 1.0))
+}
+
+/// Design effect `1 + (m − 1)·ICC` for `m` seeds per family, floored at 1 — you can never
+/// claim more precision than an independent sample (Q29.2). Matches
+/// `bench_invariants::design_effect` for integer `m`.
+fn design_effect(m: f64, icc: f64) -> f64 {
+    (1.0 + (m - 1.0) * icc).max(1.0)
+}
+
+// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 
@@ -333,6 +433,13 @@ pub struct CategoryReport {
     /// (`families < CLUSTER_FLOOR`): its CI is not trustworthy and it must be shown
     /// directional-only, never ranked.
     pub directional_only: bool,
+    /// Empirical-Bayes-shrunk within-family ICC (Q29.2), or `None` when not estimable
+    /// (fewer than two families, or one seed per family). Diagnostic/sizing only — it is
+    /// **not** an input to `score_ci`, which comes from the bootstrap.
+    pub icc: Option<f64>,
+    /// Design effect `1 + (m − 1)·ICC` at this category's mean seeds-per-family — how
+    /// many nominal units one effective unit costs. `None` when `icc` is.
+    pub design_effect: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -347,6 +454,10 @@ pub struct StatReport {
     /// Number of categories the per-category CIs are corrected over (the `K` in
     /// the simultaneous `α/K`).
     pub simultaneous_k: usize,
+    /// Pooled within-family ICC across all categories (families compared within their
+    /// own category, so category effects cancel). The shrink target for the per-category
+    /// estimates; `None` when not estimable. Diagnostic only (Q29.2).
+    pub pooled_icc: Option<f64>,
 }
 
 /// Compute the full report from a set of graded records.
@@ -367,15 +478,42 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
 
     // One deterministic RNG stream for the whole report → reproducible CIs.
     let mut rng = Rng::new(0x5EED_5747_5747_5747);
-    let capability_ci = bootstrap_overall(&by_score, iters, ALPHA, &mut rng);
+    let capability_ci = clamp_ci(
+        bootstrap_overall(&by_score, iters, ALPHA, &mut rng),
+        0.0,
+        1.0,
+    );
+
+    // ICC (Q29.2): per-category ANOVA estimate, empirical-Bayes-shrunk toward the pooled
+    // value; the shrink target falls back to the design assumption when nothing is
+    // estimable. Diagnostic only — never used in a CI above.
+    let mut pooled_comp = IccComponents::default();
+    for fams in by_score.values() {
+        pooled_comp.add(&icc_components(fams));
+    }
+    let pooled_icc = icc_from(&pooled_comp);
+    let shrink_target = pooled_icc.unwrap_or(bench_invariants::ICC);
 
     let mut categories = Vec::new();
     for (cat, fams) in &by_score {
         let mean_score = category_mean(fams).unwrap_or(f64::NAN);
         let pass_rate = by_pass.get(cat).and_then(category_mean).unwrap_or(f64::NAN);
         let families = fams.len();
-        let units = fams.values().map(|u| u.len()).sum();
-        let score_ci = bootstrap_category(fams, iters, cat_alpha, &mut rng);
+        let units: usize = fams.values().map(|u| u.len()).sum();
+        let score_ci = clamp_ci(
+            bootstrap_category(fams, iters, cat_alpha, &mut rng),
+            0.0,
+            1.0,
+        );
+
+        let comp = icc_components(fams);
+        let icc = icc_from(&comp).map(|raw| {
+            // Shrink toward the pooled target by between-family df.
+            let w = comp.df_b / (comp.df_b + ICC_SHRINK_TAU);
+            w * raw + (1.0 - w) * shrink_target
+        });
+        let design_effect = icc.map(|i| design_effect(units as f64 / families.max(1) as f64, i));
+
         categories.push(CategoryReport {
             category: cat.clone(),
             mean_score,
@@ -384,6 +522,8 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
             units,
             score_ci,
             directional_only: families < CLUSTER_FLOOR,
+            icc,
+            design_effect,
         });
     }
 
@@ -395,6 +535,7 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
         units: records.len(),
         bootstrap_iters: iters,
         simultaneous_k: k,
+        pooled_icc,
     }
 }
 
@@ -587,7 +728,12 @@ pub fn compare_models_with(a: &[Record], b: &[Record], iters: usize) -> ModelCom
         total / count as f64
     };
     let mut rng = Rng::new(0x5EED_C0DE_D1FF_0001);
-    let delta_ci = bootstrap_category(&diffs, iters, ALPHA, &mut rng);
+    // Pass-rate difference lives in [-1, 1].
+    let delta_ci = clamp_ci(
+        bootstrap_category(&diffs, iters, ALPHA, &mut rng),
+        -1.0,
+        1.0,
+    );
 
     ModelComparison {
         n_paired,
@@ -807,6 +953,76 @@ mod tests {
         // B minus A pass-rate is negative (B is worse).
         assert!(cmp.delta_pass_rate < 0.0);
         assert!(cmp.delta_ci.0 <= cmp.delta_pass_rate && cmp.delta_pass_rate <= cmp.delta_ci.1);
+    }
+
+    fn fam_map(fams: &[(&str, &[f64])]) -> BTreeMap<String, Vec<f64>> {
+        fams.iter()
+            .map(|(k, v)| (k.to_string(), v.to_vec()))
+            .collect()
+    }
+
+    #[test]
+    fn icc_captures_pure_between_family_variance() {
+        // Each family is internally constant, families differ → all variance is
+        // between families → ICC = 1.
+        let m = fam_map(&[("a", &[0.0, 0.0]), ("b", &[0.5, 0.5]), ("c", &[1.0, 1.0])]);
+        let icc = icc_from(&icc_components(&m)).unwrap();
+        assert!((icc - 1.0).abs() < 1e-9, "got {icc}");
+    }
+
+    #[test]
+    fn icc_captures_pure_within_family_variance() {
+        // Every family has the same mean (0.5) with variance inside → no between
+        // variance → ICC = 0.
+        let m = fam_map(&[
+            ("a", &[0.0, 1.0, 0.0, 1.0]),
+            ("b", &[1.0, 0.0, 1.0, 0.0]),
+            ("c", &[0.0, 1.0, 1.0, 0.0]),
+        ]);
+        let icc = icc_from(&icc_components(&m)).unwrap();
+        assert!(icc < 1e-9, "got {icc}");
+    }
+
+    #[test]
+    fn icc_not_estimable_without_replication() {
+        // One seed per family: no within-family df, so the two variance components
+        // cannot be separated → not estimable.
+        let m = fam_map(&[("a", &[1.0]), ("b", &[0.0]), ("c", &[0.5])]);
+        assert_eq!(icc_from(&icc_components(&m)), None);
+        // Fewer than two families is also not estimable.
+        let m1 = fam_map(&[("a", &[0.0, 1.0, 0.5])]);
+        assert_eq!(icc_from(&icc_components(&m1)), None);
+    }
+
+    #[test]
+    fn report_shrinks_icc_and_derives_design_effect() {
+        // Two categories, each with a few families that have within-family
+        // replication so ICC is estimable. Check the report exposes a pooled ICC,
+        // per-category shrunk ICC in [0,1], and a design effect >= 1.
+        let mut v = Vec::new();
+        for (cat, base) in [("cat-a", 0.0f64), ("cat-b", 0.5f64)] {
+            for (fi, off) in [0.0f64, 0.3, 0.6].into_iter().enumerate() {
+                // within-family spread so df_w > 0, plus a between-family offset
+                for (u, d) in [-0.05f64, 0.05].into_iter().enumerate() {
+                    let s: f64 = (base + off + d).clamp(0.0, 1.0);
+                    v.push(Record::synthetic(
+                        cat,
+                        &format!("f{fi}"),
+                        u as u64,
+                        s,
+                        s >= 0.5,
+                    ));
+                }
+            }
+        }
+        let r = report_with(&v, 500);
+        assert!(r.pooled_icc.is_some(), "pooled ICC should be estimable");
+        for c in &r.categories {
+            let icc = c.icc.expect("per-category ICC estimable");
+            assert!((0.0..=1.0).contains(&icc), "icc out of range: {icc}");
+            let de = c.design_effect.unwrap();
+            assert!(de >= 1.0, "design effect must be >= 1, got {de}");
+        }
     }
 
     #[test]

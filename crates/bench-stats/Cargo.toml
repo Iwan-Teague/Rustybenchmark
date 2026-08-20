@@ -11,5 +11,6 @@ repository.workspace = true
 
 [dependencies]
 bench-core = { path = "../bench-core" }
+bench-invariants = { path = "../bench-invariants" }
 serde = { workspace = true }
 serde_json = { workspace = true }
