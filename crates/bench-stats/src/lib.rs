@@ -10,11 +10,13 @@
 //!   threshold on the continuous score. It drives the binary metrics (pass-rate);
 //!   the continuous `oracle.score` drives capability.
 //! - **Confidence intervals are the cluster bootstrap** (Q29), never the
-//!   design-effect formula. We resample the coarsest cluster available. Shapes are
-//!   not labelled yet (needs Q24), so the interim cluster is the **family**, and
-//!   every CI is flagged as a lower bound on width (it under-covers by the shape
-//!   clustering it cannot see). Categories with too few families to bootstrap are
-//!   marked **directional-only**.
+//!   design-effect formula. Specifically the **wild cluster bootstrap** (Q29.5):
+//!   Rademacher sign-flips on per-family residual sums, which keeps coverage where
+//!   the naive resample-families percentile bootstrap under-covers with few
+//!   clusters. The cluster is the **family** for now — shapes are not labelled yet
+//!   (needs Q24), so every CI is still a lower bound on width (it cannot see the
+//!   shape clustering). Categories with too few families are marked
+//!   **directional-only**.
 //! - **Multiplicity**: per-category CIs shown together are **simultaneous** —
 //!   Bonferroni level `1 − α/K` across the `K` categories reported (Q29.4).
 //!
@@ -167,9 +169,6 @@ impl Rng {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
         z ^ (z >> 31)
     }
-    fn below(&mut self, n: usize) -> usize {
-        (self.next_u64() % n as u64) as usize
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,65 +186,76 @@ fn percentile_ci(mut samples: Vec<f64>, alpha: f64) -> (f64, f64) {
     (samples[idx(alpha / 2.0)], samples[idx(1.0 - alpha / 2.0)])
 }
 
-/// Resample the families of one category with replacement, carrying their units,
-/// and return the resampled category mean.
-fn resample_category_mean(families: &[&Vec<f64>], rng: &mut Rng) -> f64 {
-    let k = families.len();
-    let mut sum = 0.0;
-    let mut n = 0usize;
-    for _ in 0..k {
-        let fam = families[rng.below(k)];
-        for &v in fam {
-            sum += v;
-            n += 1;
+/// Precomputed **wild cluster bootstrap** state for one cluster set (the families of a
+/// category): the point mean `mu`, each family's residual sum `e_g = Σ_{i∈g}(y_i − μ)`,
+/// and the total unit count. The wild cluster bootstrap (Cameron–Gelbach–Miller, Q29.5)
+/// flips each family's residual sum by an i.i.d. Rademacher sign each draw. It keeps
+/// coverage down to ~12 clusters where the naive resample-families percentile bootstrap
+/// under-covers (measured 92% / 84%), and it never manufactures spread the residuals do
+/// not contain — a homogeneous category still gets a zero-width interval, correctly.
+struct WildCat {
+    mu: f64,
+    e: Vec<f64>,
+    n: usize,
+}
+
+impl WildCat {
+    fn new(families: &[&Vec<f64>]) -> Option<WildCat> {
+        let n: usize = families.iter().map(|f| f.len()).sum();
+        if n == 0 {
+            return None;
         }
+        let mu = families.iter().flat_map(|f| f.iter()).sum::<f64>() / n as f64;
+        let e = families
+            .iter()
+            .map(|f| f.iter().map(|&y| y - mu).sum::<f64>())
+            .collect();
+        Some(WildCat { mu, e, n })
     }
-    if n == 0 {
-        0.0
-    } else {
-        sum / n as f64
+
+    /// One wild draw of the category mean: `μ* = μ + (Σ_g w_g e_g) / N`, `w_g` Rademacher.
+    fn draw(&self, rng: &mut Rng) -> f64 {
+        let mut delta = 0.0;
+        for &eg in &self.e {
+            let w = if rng.next_u64() & 1 == 0 { 1.0 } else { -1.0 };
+            delta += w * eg;
+        }
+        self.mu + delta / self.n as f64
     }
 }
 
-/// Stratified family cluster bootstrap for the overall equal-weight statistic:
-/// resample families within each category, recompute each category mean, combine
-/// equal-weight; return the CI over `iters` replicates.
+fn wildcat(families: &BTreeMap<String, Vec<f64>>) -> Option<WildCat> {
+    let fams: Vec<&Vec<f64>> = families.values().collect();
+    WildCat::new(&fams)
+}
+
+/// Wild cluster bootstrap for the overall equal-weight statistic: draw each category
+/// mean with its own family sign-flips, average equal-weight; CI over `iters` replicates.
 fn bootstrap_overall(g: &Grouped, iters: usize, alpha: f64, rng: &mut Rng) -> (f64, f64) {
-    let cats: Vec<Vec<&Vec<f64>>> = g.values().map(|fams| fams.values().collect()).collect();
-    let mut reps = Vec::with_capacity(iters);
-    for _ in 0..iters {
-        let mut acc = 0.0;
-        let mut c = 0usize;
-        for fams in &cats {
-            if fams.is_empty() {
-                continue;
-            }
-            acc += resample_category_mean(fams, rng);
-            c += 1;
-        }
-        if c > 0 {
-            reps.push(acc / c as f64);
-        }
+    let cats: Vec<WildCat> = g.values().filter_map(wildcat).collect();
+    if cats.is_empty() {
+        return (f64::NAN, f64::NAN);
     }
+    let reps = (0..iters)
+        .map(|_| cats.iter().map(|c| c.draw(rng)).sum::<f64>() / cats.len() as f64)
+        .collect();
     percentile_ci(reps, alpha)
 }
 
-/// Family cluster bootstrap for a single category mean.
+/// Wild cluster bootstrap for a single category mean.
 fn bootstrap_category(
     families: &BTreeMap<String, Vec<f64>>,
     iters: usize,
     alpha: f64,
     rng: &mut Rng,
 ) -> (f64, f64) {
-    let fams: Vec<&Vec<f64>> = families.values().collect();
-    if fams.is_empty() {
-        return (f64::NAN, f64::NAN);
+    match wildcat(families) {
+        None => (f64::NAN, f64::NAN),
+        Some(wc) => {
+            let reps = (0..iters).map(|_| wc.draw(rng)).collect();
+            percentile_ci(reps, alpha)
+        }
     }
-    let mut reps = Vec::with_capacity(iters);
-    for _ in 0..iters {
-        reps.push(resample_category_mean(&fams, rng));
-    }
-    percentile_ci(reps, alpha)
 }
 
 // ---------------------------------------------------------------------------
@@ -402,13 +412,66 @@ mod tests {
 
     #[test]
     fn homogeneous_category_has_zero_width_ci() {
-        // Cat A is all-1.0: resampling its families can never move the mean, so its
-        // CI has zero width. This is exactly the few/homogeneous-cluster
-        // over-confidence the directional_only flag warns about.
+        // Cat A is all-1.0: every family residual is zero, so the wild bootstrap can
+        // never move the mean and the CI has zero width — correct (there is no
+        // variance to report), and the category is still flagged directional-only.
         let r = report_with(&dataset(), 500);
         let a = r.categories.iter().find(|c| c.category == "cat-a").unwrap();
         assert!((a.score_ci.0 - 1.0).abs() < 1e-9 && (a.score_ci.1 - 1.0).abs() < 1e-9);
         assert!(a.directional_only, "and it is flagged as not trustworthy");
+    }
+
+    #[test]
+    fn wild_ci_reflects_between_family_variance() {
+        // One category, two families at 1.0 and 0.0 (mean 0.5). The wild bootstrap
+        // must produce a non-trivial interval that brackets the mean — it picks up
+        // the between-family spread rather than collapsing to zero width.
+        let mut v = Vec::new();
+        for u in 0..3 {
+            v.push(Record::synthetic("c", "f-hi", u, 1.0, true));
+        }
+        for u in 0..3 {
+            v.push(Record::synthetic("c", "f-lo", u, 0.0, false));
+        }
+        let r = report_with(&v, 4000);
+        let c = &r.categories[0];
+        assert!((c.mean_score - 0.5).abs() < 1e-9);
+        let width = c.score_ci.1 - c.score_ci.0;
+        assert!(
+            width > 0.4,
+            "expected a wide interval from spread, got {width}"
+        );
+        assert!(c.score_ci.0 <= 0.5 && 0.5 <= c.score_ci.1);
+    }
+
+    #[test]
+    fn wild_bootstrap_coverage_is_near_nominal() {
+        // Q29.5's validation: simulate clustered data whose population mean is 0
+        // (cluster effects and noise both mean-zero), and check the 95% wild CI
+        // covers 0 close to 95% of the time. The naive resample-families percentile
+        // bootstrap under-covers this design; the wild bootstrap should not.
+        let mut rng = Rng::new(0xC0FF_EE12_3400);
+        let uni = |r: &mut Rng| (r.next_u64() >> 11) as f64 / (1u64 << 53) as f64; // [0,1)
+        let trials = 600;
+        let (g, n) = (12usize, 4usize);
+        let mut covered = 0;
+        for _ in 0..trials {
+            let mut fams: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+            for gi in 0..g {
+                let eff = uni(&mut rng) * 2.0 - 1.0; // cluster effect in [-1, 1)
+                let units: Vec<f64> = (0..n).map(|_| eff + uni(&mut rng) * 0.6 - 0.3).collect();
+                fams.insert(format!("f{gi:02}"), units);
+            }
+            let (lo, hi) = bootstrap_category(&fams, 400, 0.05, &mut rng);
+            if lo <= 0.0 && 0.0 <= hi {
+                covered += 1;
+            }
+        }
+        let coverage = covered as f64 / trials as f64;
+        assert!(
+            coverage >= 0.85,
+            "wild CI coverage {coverage} is too low (nominal 0.95)"
+        );
     }
 
     #[test]

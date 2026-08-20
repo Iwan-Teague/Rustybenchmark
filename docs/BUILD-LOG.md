@@ -8,6 +8,28 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-20 · `bench-stats` — wild cluster bootstrap (Q29.5)
+
+Replaced the interim resample-families percentile bootstrap with the **wild cluster bootstrap**
+(Cameron–Gelbach–Miller), the method the Q29.5 decision named for few-cluster coverage. It precomputes
+each family's residual sum `e_g = Σ(y_i − μ)` and, per replicate, flips each `e_g` by an i.i.d.
+Rademacher sign: `μ* = μ + (Σ_g w_g e_g)/N`. The replicate distribution carries the cluster-robust
+variance, so it holds coverage where resampling few clusters under-covers — and it never manufactures
+spread the residuals don't contain (a homogeneous category still gets a zero-width interval).
+
+Validated by simulation, as Q29.5 requires: a new test generates clustered data with a mean-zero
+population (cluster effects + within-cluster noise) and checks the 95% wild CI covers 0. **Measured
+coverage 0.90 at G = 12 clusters**, up from the naive percentile's 0.84–0.92 under-coverage and close to
+nominal 0.95. (Studentising the replicates would tighten it further toward 0.95 — a noted future
+refinement.) Also added a test that the wild CI picks up between-family variance (a category split
+1.0/0.0 gets a wide interval bracketing 0.5, not a collapsed one).
+
+`bench-stats` now 10 tests; workspace 89; clippy/fmt clean. The `directional_only` flag and simultaneous
+per-category α are unchanged — the wild bootstrap improves the interval, it does not change which
+categories are rankable.
+
+---
+
 ## 2026-08-20 · `bench-stats` — journal → capability, pass-rate, cluster-bootstrap CIs (P4)
 
 With Q28/Q29 decided, built the crate they unblocked. `bench-stats` reads a JSONL journal and computes,
