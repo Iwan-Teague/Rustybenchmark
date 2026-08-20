@@ -6,17 +6,16 @@
 //! workspace that is separate from anything the model ever saw — the oracle
 //! files are injected only here (docs/03-oracle.md).
 //!
-//! Not yet sandboxed: model-authored code runs under the plain process API.
-//! `bench-sandbox` (P1) wraps these invocations with network denial and
-//! rlimits. The seam is deliberately narrow — every external command goes
-//! through `run_cargo`, so P1 has exactly one place to harden.
+//! Model-authored code runs under containment: every `cargo` invocation goes
+//! through `bench-sandbox` (P1), which on macOS denies network and confines
+//! writes to the workspace. The seam is deliberately narrow — one `run_cargo`
+//! helper — so containment is applied in exactly one place.
 
 use bench_core::{
     classify_error_codes, composite_score, BehaviorScore, ConstraintScore, FailureClass, Instance,
     OracleVector, OracleWeights,
 };
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OracleError {
@@ -74,8 +73,13 @@ pub fn grade(
         write_under(workspace, rel, contents)?;
     }
 
+    // Containment for every model-code execution below. Built once; the model
+    // has already produced its response (unsandboxed HTTP), and nothing it
+    // wrote runs until now.
+    let policy = bench_sandbox::Policy::for_workspace(workspace)?;
+
     // ---- L1: compile ----
-    let build = run_cargo(workspace, &["build", "--offline", "--message-format=json"])?;
+    let build = run_cargo(&policy, &["build", "--offline", "--message-format=json"])?;
     let (error_codes, warn_count) = parse_diagnostics(&build.stdout);
     let compile_ok = build.success;
 
@@ -102,7 +106,7 @@ pub fn grade(
         targs.push(name);
     }
     targs.extend_from_slice(&["--offline", "--quiet"]);
-    let test = run_cargo(workspace, &targs)?;
+    let test = run_cargo(&policy, &targs)?;
     let unit = parse_test_summary(&test.stdout).or_else(|| parse_test_summary(&test.stderr));
     let unit_score = unit.map(|(passed, total)| {
         if total == 0 {
@@ -121,7 +125,7 @@ pub fn grade(
 
     // ---- L2 differential: candidate vs hidden reference over generated inputs ----
     if let Some(name) = spec.differential_test {
-        let out = run_cargo(workspace, &["test", "--test", name, "--offline", "--quiet"])?;
+        let out = run_cargo(&policy, &["test", "--test", name, "--offline", "--quiet"])?;
         behavior.differential =
             match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
                 Some((passed, total)) if total > 0 => Some(passed as f32 / total as f32),
@@ -133,7 +137,7 @@ pub fn grade(
     // ---- L3: constraint (allocation) ----
     let mut constraint = ConstraintScore::default();
     if let Some(name) = spec.alloc_test {
-        let out = run_cargo(workspace, &["test", "--test", name, "--offline", "--quiet"])?;
+        let out = run_cargo(&policy, &["test", "--test", name, "--offline", "--quiet"])?;
         match parse_test_summary(&out.stdout).or_else(|| parse_test_summary(&out.stderr)) {
             Some((passed, total)) if total > 0 => {
                 let ok = passed == total;
@@ -232,17 +236,15 @@ struct CargoRun {
     stderr: String,
 }
 
-fn run_cargo(workspace: &Path, args: &[&str]) -> std::io::Result<CargoRun> {
-    // The single external-command seam. P1's sandbox wraps exactly this.
-    let out = Command::new("cargo")
-        .args(args)
-        .current_dir(workspace)
-        .env("CARGO_TERM_COLOR", "never")
-        .output()?;
+fn run_cargo(policy: &bench_sandbox::Policy, args: &[&str]) -> std::io::Result<CargoRun> {
+    // The single external-command seam — every model-code execution the oracle
+    // performs (compile, since proc macros run at build time; and every test
+    // binary) goes through here, and here alone gets containment.
+    let out = bench_sandbox::run(policy, "cargo", args, &[("CARGO_TERM_COLOR", "never")])?;
     Ok(CargoRun {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        success: out.success(),
+        stdout: out.stdout,
+        stderr: out.stderr,
     })
 }
 

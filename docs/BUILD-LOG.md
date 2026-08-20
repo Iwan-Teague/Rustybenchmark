@@ -8,6 +8,50 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-19 · P1 (partial) — bench-sandbox: containing model-authored code
+
+**What.** Until now the oracle ran arbitrary model-authored Rust under plain
+`std::process::Command` — no containment. `bench-sandbox` closes that. Every
+`cargo` invocation the oracle makes (compile, since proc macros run at *build*
+time, and every test binary) now routes through one `run` seam.
+
+**macOS (implemented, tested here).** A seatbelt profile via `sandbox-exec`:
+permit by default, then subtract the two things that matter —
+
+- **network denied** (`deny network*`): the documented Terminal-Bench "agent
+  fetched solutions online" threat; and
+- **writes confined** (`deny file-write*` + allow only the workspace, cargo
+  caches, and temp): model code cannot write or delete outside the grading
+  workspace — no `rm -rf ~`.
+
+Reads stay broad because the toolchain needs them and reads are not the threat.
+The profile was found empirically: a clean `cargo build`/`test` of the frozen
+task runs fine under it.
+
+**The escape tests are the proof, and they run in CI.** From inside the sandbox:
+
+| probe | sandboxed result |
+|---|---|
+| `TcpStream` connect to 1.1.1.1:80 | **blocked** (`Operation not permitted`) — reaches it unsandboxed |
+| write to `~/rb-escape-probe.txt` | **blocked** |
+| write inside the workspace | allowed (grading must still work) |
+
+**Grading is identical under containment** — pass 1.000, subtlebug 0.844, clone
+0.389, byte-for-byte the same as before the sandbox. The containment contains
+without perturbing the measurement.
+
+**Recorded for integrity.** The journal now carries `sandbox: "seatbelt"` (or
+`"unsupported"`), and the CLI prints `[sandbox: seatbelt]`. A leaderboard must
+know whether model code was contained (docs/10).
+
+**Linux / Windows: honestly not yet.** `available()` returns `Unsupported` and
+`run` executes uncontained with a loud warning and an `unsupported` journal flag.
+The netns (Linux) and job-object (Windows) paths are the remaining P1 work; the
+crate never pretends to contain what it cannot. Also deferred: rlimits
+(address-space / CPU-time / pid caps) and the harness-owned wall-clock timeout.
+
+---
+
 ## 2026-08-19 · P2 (partial) — L2 differential sub-oracle
 
 **What.** The other half of the P2 exit criterion: *"a deliberately-wrong-but-

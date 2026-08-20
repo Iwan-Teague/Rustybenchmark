@@ -83,6 +83,7 @@ dependencies = [
  "bench-core",
  "bench-model",
  "bench-oracle",
+ "bench-sandbox",
  "clap",
  "serde",
  "serde_json",
@@ -114,10 +115,15 @@ name = "bench-oracle"
 version = "0.0.1"
 dependencies = [
  "bench-core",
+ "bench-sandbox",
  "serde",
  "serde_json",
  "thiserror",
 ]
+
+[[package]]
+name = "bench-sandbox"
+version = "0.0.1"
 
 [[package]]
 name = "bitflags"

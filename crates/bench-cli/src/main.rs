@@ -85,6 +85,10 @@ struct JournalLine {
     seed: u64,
     index: u32,
     model: ModelInfo,
+    /// What containment grading ran under: "seatbelt" (macOS) or "unsupported".
+    /// Integrity-relevant — a leaderboard must know whether model code was
+    /// contained (docs/10-integrity.md).
+    sandbox: String,
     oracle: OracleVector,
     cost: Cost,
     failure_class: FailureClass,
@@ -157,7 +161,14 @@ fn run(
     };
 
     // --- the model turn (harness process, not sandboxed) ---
-    println!("→ {} against {base_url} ({model_name})", manifest.id);
+    println!(
+        "→ {} against {base_url} ({model_name}) [sandbox: {}]",
+        manifest.id,
+        match bench_sandbox::available() {
+            bench_sandbox::Containment::Seatbelt => "seatbelt",
+            _ => "none",
+        }
+    );
     let client = ModelClient::new(base_url, model_name);
     let completion =
         client.complete(&manifest.system_prompt, &prompt, &SamplingConfig::default())?;
@@ -191,6 +202,14 @@ fn run(
         alloc_test: ocfg.alloc_test.as_deref(),
     };
 
+    let containment = match bench_sandbox::available() {
+        bench_sandbox::Containment::Seatbelt => "seatbelt",
+        bench_sandbox::Containment::Unsupported => "unsupported",
+    };
+    if containment == "unsupported" {
+        eprintln!("  ! warning: no sandbox on this platform — model code runs uncontained");
+    }
+
     let grade_start = std::time::Instant::now();
     let vector = bench_oracle::grade(&instance, &completion.text, &spec, &ws)?;
     let grade_ms = grade_start.elapsed().as_millis() as u64;
@@ -208,6 +227,7 @@ fn run(
             base_url: base_url.to_string(),
             finish_reason: completion.finish_reason.clone(),
         },
+        sandbox: containment.to_string(),
         oracle: vector.clone(),
         cost: Cost {
             prompt_tokens: completion.prompt_tokens,

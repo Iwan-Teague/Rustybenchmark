@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 bench-core = { path = "../bench-core" }
+bench-sandbox = { path = "../bench-sandbox" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
