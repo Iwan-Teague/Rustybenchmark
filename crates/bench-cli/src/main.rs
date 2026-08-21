@@ -1094,6 +1094,13 @@ fn render_report_md(r: &bench_stats::StatReport, d: &bench_stats::DiagnosticsRep
         join(&d.failure_classes, d.failure_classes.len())
     );
     let _ = writeln!(s, "- **top error codes**: {}", join(&d.error_codes, 10));
+    if d.typeck_only > 0 {
+        let _ = writeln!(
+            s,
+            "- **borrowck masked**: {} failure(s) aborted before borrow checking — borrow-failure counts are a lower bound",
+            d.typeck_only
+        );
+    }
 
     let _ = writeln!(s, "\n---");
     let _ = writeln!(

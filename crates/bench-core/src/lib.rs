@@ -230,6 +230,23 @@ pub enum FailureClass {
     None,
 }
 
+/// Whether compilation reached borrow checking (docs/03-oracle.md §L1). Type
+/// checking aborts before borrowck runs, so a solution with a type/trait/resolve/
+/// syntax error never reaches borrowck and any borrow bug it also has is *masked*
+/// — the error histogram then systematically undercounts borrow failures in
+/// exactly this project's niche. Recording this lets borrow-failure counts be
+/// published as the lower bound they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticCompleteness {
+    /// Borrowck was reached — the unit compiled, or the errors shown are themselves
+    /// borrow/lifetime errors (so borrowck ran and emitted them).
+    #[default]
+    Full,
+    /// An earlier phase aborted before borrowck ran; borrow counts are a lower bound.
+    TypeckOnly,
+}
+
 impl FailureClass {
     /// The kebab-case name (matches the serde representation), for histograms and
     /// human-readable reports.
@@ -261,6 +278,10 @@ pub struct OracleVector {
     pub compile_ok: bool,
     pub error_codes: Vec<String>,
     pub warn_count: u32,
+    /// Whether borrowck was reached (docs/03 §L1). `#[serde(default)]` = `Full` so
+    /// journals predating this field parse unchanged.
+    #[serde(default)]
+    pub diagnostic_completeness: DiagnosticCompleteness,
     // L2 behavior
     pub behavior: BehaviorScore,
     // L3 constraint
@@ -282,6 +303,7 @@ impl OracleVector {
             compile_ok: false,
             error_codes: Vec::new(),
             warn_count: 0,
+            diagnostic_completeness: DiagnosticCompleteness::Full,
             behavior: BehaviorScore::default(),
             constraint: ConstraintScore::default(),
             score: 0.0,
@@ -449,6 +471,21 @@ pub fn classify_graded(
     }
 }
 
+/// Whether a **compile failure** reached borrow checking (docs/03-oracle.md §L1).
+/// Reuses the phase ordering baked into [`classify_error_codes`]: a borrow/lifetime
+/// error means borrowck ran and emitted it (`Full`); an earlier-phase error
+/// (syntax / resolve / type / trait) with no borrow/lifetime error means borrowck
+/// was never reached (`TypeckOnly`) and any borrow bug is masked. `None`/`Other`
+/// carry no evidence borrowck was skipped, so they stay `Full`.
+pub fn diagnostic_completeness(codes: &[String]) -> DiagnosticCompleteness {
+    match classify_error_codes(codes) {
+        FailureClass::Syntax | FailureClass::Resolve | FailureClass::Type | FailureClass::Trait => {
+            DiagnosticCompleteness::TypeckOnly
+        }
+        _ => DiagnosticCompleteness::Full,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +534,7 @@ mod tests {
             compile_ok: true,
             error_codes: vec![],
             warn_count: 0,
+            diagnostic_completeness: DiagnosticCompleteness::Full,
             behavior: BehaviorScore {
                 unit: behavior,
                 property: None,
@@ -673,6 +711,28 @@ mod tests {
             FailureClass::Borrowck
         );
         assert_eq!(classify_compile_error(&[], &[]), FailureClass::None);
+    }
+
+    #[test]
+    fn diagnostic_completeness_flags_masked_borrowck() {
+        // A type error with no borrow error: borrowck was never reached, so borrow
+        // counts are a lower bound (docs/03's measured case).
+        assert_eq!(
+            diagnostic_completeness(&["E0308".into()]),
+            DiagnosticCompleteness::TypeckOnly
+        );
+        // A pure borrow failure: borrowck ran and emitted it.
+        assert_eq!(
+            diagnostic_completeness(&["E0499".into()]),
+            DiagnosticCompleteness::Full
+        );
+        // Type + borrow together: the borrow error is present, so borrowck ran.
+        assert_eq!(
+            diagnostic_completeness(&["E0308".into(), "E0499".into()]),
+            DiagnosticCompleteness::Full
+        );
+        // No codes / unknown: no evidence borrowck was skipped.
+        assert_eq!(diagnostic_completeness(&[]), DiagnosticCompleteness::Full);
     }
 
     #[test]

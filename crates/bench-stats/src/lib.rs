@@ -34,7 +34,7 @@
 //! it starts running on real data once the epoch protocol emits labelled
 //! fresh-probe units (ADR-0009).
 
-use bench_core::OracleVector;
+use bench_core::{DiagnosticCompleteness, OracleVector};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -652,6 +652,10 @@ pub struct DiagnosticsReport {
     /// `rustc error code → count` across core units, most frequent first. Borrow
     /// failures are a lower bound (typeck aborts before borrowck — docs/03).
     pub error_codes: Vec<(String, usize)>,
+    /// Core units whose compile failed *before* borrowck was reached
+    /// (`diagnostic_completeness == typeck_only`). This is how many failures could
+    /// be hiding a borrow bug, i.e. the size of the borrow-count undercount.
+    pub typeck_only: usize,
 }
 
 /// Compute [`DiagnosticsReport`] over the **core** units only (the fresh probe is
@@ -674,6 +678,10 @@ pub fn diagnostics(records: &[Record]) -> DiagnosticsReport {
     } else {
         0.0
     };
+    let typeck_only = core
+        .iter()
+        .filter(|r| r.oracle.diagnostic_completeness == DiagnosticCompleteness::TypeckOnly)
+        .count();
 
     let mut fc: BTreeMap<String, usize> = BTreeMap::new();
     let mut codes: BTreeMap<String, usize> = BTreeMap::new();
@@ -696,6 +704,7 @@ pub fn diagnostics(records: &[Record]) -> DiagnosticsReport {
         compile_rate,
         failure_classes: sort_desc(fc),
         error_codes: sort_desc(codes),
+        typeck_only,
     }
 }
 
@@ -1441,9 +1450,13 @@ mod tests {
         recs.push(Record::synthetic_unit(
             "c", "f", "e", "probe", 0, 0.0, false,
         ));
+        // Two of the core failures had borrowck masked by an earlier-phase error.
+        recs[0].oracle.diagnostic_completeness = DiagnosticCompleteness::TypeckOnly;
+        recs[1].oracle.diagnostic_completeness = DiagnosticCompleteness::TypeckOnly;
 
         let d = diagnostics(&recs);
         assert_eq!(d.units, 5, "5 core units; probe excluded");
+        assert_eq!(d.typeck_only, 2, "two core failures were typeck-only");
         assert!((d.apply_rate - 4.0 / 5.0).abs() < 1e-9, "{}", d.apply_rate); // 4 of 5 applied
         assert!(
             (d.compile_rate - 2.0 / 4.0).abs() < 1e-9,

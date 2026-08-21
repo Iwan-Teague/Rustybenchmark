@@ -14,8 +14,8 @@
 pub mod ast;
 
 use bench_core::{
-    classify_compile_error, classify_graded, composite_score, BehaviorScore, ConstraintScore,
-    Instance, OracleVector, OracleWeights,
+    classify_compile_error, classify_graded, composite_score, diagnostic_completeness,
+    BehaviorScore, ConstraintScore, DiagnosticCompleteness, Instance, OracleVector, OracleWeights,
 };
 use std::path::Path;
 
@@ -103,11 +103,13 @@ pub fn grade(
 
     if !compile_ok {
         let failure_class = classify_compile_error(&error_codes, &error_messages);
+        let completeness = diagnostic_completeness(&error_codes);
         let mut v = OracleVector {
             apply_ok: true,
             compile_ok: false,
             error_codes,
             warn_count,
+            diagnostic_completeness: completeness,
             behavior: BehaviorScore::default(),
             constraint: ConstraintScore::default(),
             score: 0.0,
@@ -276,6 +278,8 @@ pub fn grade(
         compile_ok: true,
         error_codes,
         warn_count,
+        // It compiled, so borrowck ran — the diagnostic is complete.
+        diagnostic_completeness: DiagnosticCompleteness::Full,
         behavior,
         constraint,
         score: 0.0,
