@@ -6,10 +6,11 @@
 //! as the leaf crates grow.
 //!
 //! Scope so far: identifiers, the instance a model is graded on, the layered
-//! oracle *vector*, the scoring arithmetic, the rustc-error-code →
-//! `FailureClass` lookup, and per-layer weight renormalisation. L2 behaviour and
-//! the L3 allocation constraint are populated; L2 property/differential and L4
-//! quality are declared but not yet filled.
+//! oracle *vector*, the scoring arithmetic, the rustc-diagnostic → `FailureClass`
+//! classification (error codes, message patterns, and compiled-unit layer
+//! outcomes), and per-layer weight renormalisation. L2 behaviour and the L3
+//! allocation/clippy constraints are populated; L2 property and L4 quality are
+//! declared but not yet filled.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -369,6 +370,64 @@ pub fn classify_error_codes(codes: &[String]) -> FailureClass {
     }
 }
 
+/// Rendered-message substrings that pin a failure class the error code cannot
+/// (docs/03-oracle.md): 18% of realistic Rust failures carry **no** error code —
+/// most importantly the characteristic async one, `future cannot be sent between
+/// threads safely`, which is `code: None`. And `E0277` spans four categories, so a
+/// `Send`/`Sync` bound failure (message `… cannot be sent/shared between threads
+/// safely`) is upgraded to `AsyncSend` before the code table can bucket it as a
+/// generic `Trait`. Matched case-insensitively, most-specific first.
+const MESSAGE_PATTERNS: &[(&str, FailureClass)] = &[
+    (
+        "cannot be sent between threads safely",
+        FailureClass::AsyncSend,
+    ),
+    (
+        "cannot be shared between threads safely",
+        FailureClass::AsyncSend,
+    ),
+    (
+        "future cannot be sent between threads",
+        FailureClass::AsyncSend,
+    ),
+];
+
+/// Classify a **compile failure** from its rustc error codes *and* rendered
+/// messages (docs/03-oracle.md: `classify(error_code, message_pattern, …)`). The
+/// message table is consulted first, so codeless errors and `Send`/`Sync` bounds
+/// are classified where the code table alone is blind or ambiguous; otherwise it
+/// falls back to [`classify_error_codes`].
+pub fn classify_compile_error(codes: &[String], messages: &[String]) -> FailureClass {
+    let matches = |needle: &str| messages.iter().any(|m| m.to_lowercase().contains(needle));
+    for (needle, class) in MESSAGE_PATTERNS {
+        if matches(needle) {
+            return *class;
+        }
+    }
+    classify_error_codes(codes)
+}
+
+/// Classify a unit that **compiled**, from its layer outcomes (docs/03-oracle.md).
+/// Order: a behaviour miss is `Logic`; otherwise a clippy violation is `Idiom` —
+/// non-idiomatic code compiles and passes behaviour, so clippy is the *only* signal
+/// it produces, which is why `idiom-refactor` classifies from clippy (docs/03 §L1);
+/// any other constraint miss is `Constraint`; a clean unit is `None`.
+pub fn classify_graded(
+    behavior_score: Option<f32>,
+    clippy_clean: Option<bool>,
+    constraint_score: Option<f32>,
+) -> FailureClass {
+    if behavior_score.map(|s| s < 1.0).unwrap_or(true) {
+        FailureClass::Logic
+    } else if clippy_clean == Some(false) {
+        FailureClass::Idiom
+    } else if constraint_score.map(|s| s < 1.0).unwrap_or(false) {
+        FailureClass::Constraint
+    } else {
+        FailureClass::None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,5 +618,65 @@ mod tests {
     #[test]
     fn unknown_code_is_other() {
         assert_eq!(classify_error_codes(&["E9999".into()]), FailureClass::Other);
+    }
+
+    #[test]
+    fn codeless_async_failure_is_classified_by_message() {
+        // The single most characteristic async failure carries no error code — the
+        // code table would call it `None`, but the message names it.
+        let msg = vec!["future cannot be sent between threads safely".to_string()];
+        assert_eq!(classify_compile_error(&[], &msg), FailureClass::AsyncSend);
+    }
+
+    #[test]
+    fn e0277_send_bound_upgrades_to_async_but_plain_e0277_stays_trait() {
+        // E0277 spans categories. A Send bound (message says "cannot be sent…") is
+        // async; a bare E0277 with no such message is a generic trait failure.
+        let send = vec!["`Rc<i32>` cannot be sent between threads safely".to_string()];
+        assert_eq!(
+            classify_compile_error(&["E0277".into()], &send),
+            FailureClass::AsyncSend
+        );
+        let plain = vec!["the trait bound `T: Foo` is not satisfied".to_string()];
+        assert_eq!(
+            classify_compile_error(&["E0277".into()], &plain),
+            FailureClass::Trait
+        );
+    }
+
+    #[test]
+    fn compile_error_without_message_match_falls_back_to_codes() {
+        // No message pattern → identical to the code-only classifier.
+        assert_eq!(
+            classify_compile_error(&["E0499".into()], &["some borrow error".into()]),
+            FailureClass::Borrowck
+        );
+        assert_eq!(classify_compile_error(&[], &[]), FailureClass::None);
+    }
+
+    #[test]
+    fn graded_classification_orders_logic_idiom_constraint_none() {
+        // Behaviour miss dominates.
+        assert_eq!(
+            classify_graded(Some(0.5), Some(false), Some(0.0)),
+            FailureClass::Logic
+        );
+        // Behaviour perfect but clippy-dirty → Idiom (the idiom-refactor signal),
+        // ahead of a generic Constraint even if another constraint also failed.
+        assert_eq!(
+            classify_graded(Some(1.0), Some(false), Some(0.0)),
+            FailureClass::Idiom
+        );
+        // Behaviour perfect, no clippy check, another constraint failed → Constraint.
+        assert_eq!(
+            classify_graded(Some(1.0), None, Some(0.5)),
+            FailureClass::Constraint
+        );
+        // Everything clean → None.
+        assert_eq!(classify_graded(Some(1.0), None, None), FailureClass::None);
+        assert_eq!(
+            classify_graded(Some(1.0), Some(true), Some(1.0)),
+            FailureClass::None
+        );
     }
 }

@@ -8,6 +8,40 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Richer `failure_class` — the diagnostic classifier reaches its dormant classes
+
+docs/03 §L1 specifies `failure_class = classify(error_code, message_pattern, clippy_lints, category)`, but
+the code only did an error-*code* lookup. Two enum variants were therefore **unreachable**: `AsyncSend`
+(Rust's most characteristic async failure, `future cannot be sent between threads safely`, carries
+`code: None` — 18% of realistic failures are codeless, docs/03) and `Idiom` (non-idiomatic code compiles
+and passes behaviour, so it produces no code — only clippy sees it). Fixed, in pure `bench-core` logic with
+fast unit tests (no grading pipeline):
+
+- **`parse_diagnostics`** (bench-oracle) now also captures the rendered **error-level messages**, not just
+  codes and the warning count.
+- **`classify_compile_error(codes, messages)`** consults a message-pattern table *before* the code table:
+  `… cannot be sent/shared between threads safely` → `AsyncSend`, which also disambiguates the notorious
+  `E0277` (it spans four categories) — a Send/Sync bound is upgraded to `AsyncSend`, everything else falls
+  through to `Trait` via the existing code table. No pattern match ⇒ identical to the old code-only path.
+- **`classify_graded(behavior, clippy_clean, constraint)`** classifies a *compiled* unit: behaviour miss →
+  `Logic`; else a clippy violation → `Idiom` (the idiom-refactor signal, ahead of a generic `Constraint`);
+  else another constraint miss → `Constraint`; else `None`. Extracted into `bench-core` so it is pure and
+  unit-tested rather than inline in the grader.
+
+`bench-oracle::grade` calls both. **No regression**: the twelve non-clippy families never set `clippy_clean`
+(→ `None`, so `classify_graded` matches the old Logic/Constraint/None), and no current family emits async
+messages (→ code-table fallback unchanged). The immediate win is `idiom-loop`: a behaviourally-correct but
+non-idiomatic answer now classifies as **`Idiom`** instead of a generic `Constraint`. `AsyncSend` has no
+producing family yet (`async-concurrency` awaits its oracle, Q11) but the classifier is ready and tested,
+so it lights up the moment async families arrive.
+
+5 new/updated tests (codeless-async → AsyncSend; E0277 split; code fallback; the graded ordering; messages
+captured by `parse_diagnostics`). 170 workspace tests (+4); clippy `-D warnings` and `cargo fmt --check`
+clean. Deferred, noted: `diagnostic_completeness` (`full` | `typeck_only`, so borrow failures are published
+as the lower bound they are — docs/03) is a natural next field.
+
+---
+
 ## 2026-08-21 · The Q14 gate, automated — `clippy --fix` must not solve the instance
 
 Promoted the previous entry's manually-measured Q14 property into a real `validate-family` gate, so it can

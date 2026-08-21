@@ -14,8 +14,8 @@
 pub mod ast;
 
 use bench_core::{
-    classify_error_codes, composite_score, BehaviorScore, ConstraintScore, FailureClass, Instance,
-    OracleVector, OracleWeights,
+    classify_compile_error, classify_graded, composite_score, BehaviorScore, ConstraintScore,
+    Instance, OracleVector, OracleWeights,
 };
 use std::path::Path;
 
@@ -98,11 +98,11 @@ pub fn grade(
     if build.timed_out {
         flags.push("timeout:build".into());
     }
-    let (error_codes, warn_count) = parse_diagnostics(&build.stdout);
+    let (error_codes, error_messages, warn_count) = parse_diagnostics(&build.stdout);
     let compile_ok = build.success;
 
     if !compile_ok {
-        let failure_class = classify_error_codes(&error_codes);
+        let failure_class = classify_compile_error(&error_codes, &error_messages);
         let mut v = OracleVector {
             apply_ok: true,
             compile_ok: false,
@@ -266,15 +266,10 @@ pub fn grade(
         constraint.recompute();
     }
 
-    // Failure class, most-specific first: compiled, so it is a behaviour (unit
-    // or differential), then constraint, then clean.
-    let failure_class = if behavior.score.map(|s| s < 1.0).unwrap_or(true) {
-        FailureClass::Logic
-    } else if constraint.score.map(|s| s < 1.0).unwrap_or(false) {
-        FailureClass::Constraint
-    } else {
-        FailureClass::None
-    };
+    // Failure class from the layer outcomes (docs/03): behaviour miss → Logic;
+    // else a clippy violation → Idiom; else another constraint miss → Constraint;
+    // else clean. Kept in `bench-core` so it is pure and unit-tested there.
+    let failure_class = classify_graded(behavior.score, constraint.clippy_clean, constraint.score);
 
     let mut v = OracleVector {
         apply_ok: true,
@@ -424,8 +419,9 @@ fn run_cargo(policy: &bench_sandbox::Policy, args: &[&str]) -> std::io::Result<C
 /// Parse `cargo build --message-format=json` output for every rustc diagnostic
 /// code, and count warnings. Every code is kept, not just success/failure —
 /// the histogram is the richest Rust-specific signal (docs/03-oracle.md).
-fn parse_diagnostics(stdout: &str) -> (Vec<String>, u32) {
+fn parse_diagnostics(stdout: &str) -> (Vec<String>, Vec<String>, u32) {
     let mut codes = Vec::new();
+    let mut messages = Vec::new();
     let mut warns = 0u32;
     for line in stdout.lines() {
         let v: serde_json::Value = match serde_json::from_str(line) {
@@ -443,19 +439,24 @@ fn parse_diagnostics(stdout: &str) -> (Vec<String>, u32) {
         if level == "warning" {
             warns += 1;
         }
-        if let Some(code) = msg
-            .get("code")
-            .and_then(|c| c.get("code"))
-            .and_then(|c| c.as_str())
-        {
-            if level == "error" {
+        if level == "error" {
+            // Keep the rendered message so codeless errors (e.g. async `Send`
+            // bounds carry `code: None`) can be classified by pattern (docs/03).
+            if let Some(text) = msg.get("message").and_then(|m| m.as_str()) {
+                messages.push(text.to_string());
+            }
+            if let Some(code) = msg
+                .get("code")
+                .and_then(|c| c.get("code"))
+                .and_then(|c| c.as_str())
+            {
                 codes.push(code.to_string());
             }
         }
     }
     codes.sort();
     codes.dedup();
-    (codes, warns)
+    (codes, messages, warns)
 }
 
 /// Parse `cargo clippy --message-format=json` output for the clippy lint codes it
@@ -567,8 +568,11 @@ mod tests {
         let json = r#"{"reason":"compiler-message","message":{"level":"error","code":{"code":"E0499"},"message":"x"}}
 {"reason":"compiler-message","message":{"level":"warning","code":{"code":"unused_variables"},"message":"y"}}
 {"reason":"compiler-artifact"}"#;
-        let (codes, warns) = parse_diagnostics(json);
+        let (codes, messages, warns) = parse_diagnostics(json);
         assert_eq!(codes, vec!["E0499".to_string()]);
+        // Only the error-level message is captured (for pattern classification);
+        // the warning's message ("y") is not.
+        assert_eq!(messages, vec!["x".to_string()]);
         assert_eq!(warns, 1);
     }
 
