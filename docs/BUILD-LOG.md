@@ -8,6 +8,56 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Thirteenth family: `idiom-loop` (`idiom-refactor`) — the fifth core category, and the first compositional one
+
+The last uncovered docs/04 core category, and the only **compositional** family: instead of ablating a
+reference to `todo!()`, it **de-idiomatises** it. The model is given a working but non-idiomatic function
+— an explicit `for i in 0..xs.len()` index loop — and must rewrite it in idiomatic, clippy-clean iterator
+style, preserving behaviour. So the ablation is *quality, not correctness*: the given code is
+behaviourally correct, and **only clippy distinguishes it** (docs/03: "non-idiomatic code compiles; clippy
+catches all of it"). This is the family the previous increment's L3 clippy oracle was built for.
+
+Seed-selected on **filter** (All / Positive / Even / Nonzero) × **map** (Identity / Double / Square /
+Negate) — the loop body — folding to a sum, so the idiomatic form is a
+`xs.iter().copied()[.filter(…)][.map(…)].sum()` chain. 4 × 4 = **16 distinct skills**. docs/04 weights it
+constraint-dominant (behavior 0.30 / **constraint 0.60** / quality 0.10): the constraint *is* clippy, and
+`max_unsafe: None` keeps the L3 layer purely clippy.
+
+`validate-family --seeds 8`, all gates green — and the middle column tells the whole story:
+
+```
+reference=1.000  skeleton=0.333 (behavior 1.000)  baselines_caught=true  canary=true
+view       min=0.274 median=0.383 near-twins 0/28
+reference  min=0.222 median=0.545 near-twins 1/28   capacity=38
+spec-diversity: 16 distinct skills
+```
+
+`skeleton=0.333 (behavior 1.000)` is the point: the de-idiomatised loop is *behaviourally perfect* and is
+caught purely by clippy dropping the constraint layer to 0 → composite `(0.30·1 + 0.60·0)/0.90 = 0.333`.
+The idiomatic reference is clippy-clean → 1.000. This needed the **validate-family gates generalised** from
+behaviour to composite: a degenerate answer is "caught" iff it does not achieve a full pass (composite <
+1.0), which now covers the `unchanged` (copy-paste) baseline — behaviourally correct, not idiomatic — as
+well as the todo!()-ablated skeletons of every other family (composite ~0, unchanged in practice).
+
+**Q14 (the `clippy --fix` trap) — verified, not assumed.** `idiom-refactor` is only meaningful if it is not
+trivially auto-solvable. Measured directly: `cargo clippy --fix` leaves `needless_range_loop` **unchanged**
+(its suggestion is not machine-applicable), so the index loop survives `--fix` and the model must actually
+reason about the rewrite. And all 16 idiomatic references were checked clippy-clean before authoring, so the
+reference reliably scores 1.000. (An *automated* clippy-`--fix` gate in `validate-family` is a sensible
+follow-up hardening; today the property is verified by measurement and holds by construction of the
+transform.)
+
+Honest consequence, recorded: for `idiom-refactor` the binary `passed()` (Q28) treats the unchanged loop as
+a *pass* (it excludes clippy as "quality"), so this category's signal lives in the continuous
+`capability_score` (via the 0.60 constraint weight), not in the pass rate. That is a property of Q28's
+scope, not a bug — and it is why the family is authored constraint-dominant.
+
+**All five docs/04 core categories are now covered** (`borrow-lifetimes`, `traits-generics`,
+`error-handling`, `unsafe-core`, `idiom-refactor`). Registered in `FAMILY_IDS` and the `spec_diversity` pin
+in the same commit. 166 workspace tests (+7); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · The clippy constraint oracle (L3) — the idiomaticity signal
 
 Built the grading layer `idiom-refactor` needs. docs/03 puts clippy in **L3 constraint** (not L4): non-

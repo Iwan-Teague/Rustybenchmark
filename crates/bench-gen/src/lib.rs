@@ -26,6 +26,7 @@ pub mod epoch;
 pub mod error_handling;
 pub mod generic_select;
 pub mod grid_reduce;
+pub mod idiom_refactor;
 pub mod seq_transform;
 pub mod stack_machine;
 pub mod string_processing;
@@ -201,6 +202,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "dual-region",
     "generic-select",
     "checked-eval",
+    "idiom-loop",
 ];
 
 /// Look up a family by id.
@@ -218,6 +220,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "dual-region" => Some(Box::new(dual_region::DualRegionFamily)),
         "generic-select" => Some(Box::new(generic_select::GenericSelectFamily)),
         "checked-eval" => Some(Box::new(checked_eval::CheckedEvalFamily)),
+        "idiom-loop" => Some(Box::new(idiom_refactor::IdiomRefactorFamily)),
         _ => None,
     }
 }
@@ -372,6 +375,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("checked-eval").unwrap().as_ref(), 4000),
             12
+        );
+        // idiom-loop = 4 filters x 4 maps (the compositional idiom-refactor family).
+        assert_eq!(
+            spec_diversity(family("idiom-loop").unwrap().as_ref(), 4000),
+            16
         );
     }
 }

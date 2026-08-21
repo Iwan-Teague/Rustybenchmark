@@ -706,33 +706,42 @@ fn validate_family(
         )?;
         let skel_behavior = skel_v.behavior.score.unwrap_or(0.0);
 
+        // A degenerate answer is "caught" iff it does not achieve a full pass — i.e.
+        // its *composite* is below 1.0. Gating on the composite (not behaviour)
+        // generalises to quality-ablated families like `idiom-refactor`, whose
+        // skeleton and `unchanged` baseline are behaviourally correct but fail the
+        // clippy constraint. For the todo!()-ablated families the composite is ~0, so
+        // the gate is unchanged in practice.
+        let caught = |v: &OracleVector| v.score < 0.99;
+
         let mut baselines_ok = true;
         let mut baseline_note = String::new();
         for (label, code) in g.trivial_baselines(seed) {
             let v = grade(&task, &code, scratch, &format!("base-{seed}-{label}"), 120)?;
-            let behav = v.behavior.score.unwrap_or(0.0);
-            if behav >= 0.999 {
+            if !caught(&v) {
                 baselines_ok = false;
-                baseline_note = format!(" <-- baseline `{label}` not caught (behavior {behav:.3})");
+                baseline_note =
+                    format!(" <-- baseline `{label}` not caught (score {:.3})", v.score);
             }
         }
 
         let canary_ok = gt.prompt.contains(&gt.canary);
 
         let ref_ok = ref_v.score >= 0.99;
-        let skel_ok = skel_behavior < 0.5;
+        let skel_ok = caught(&skel_v);
         let all = deterministic && ref_ok && skel_ok && baselines_ok && canary_ok;
         if !all {
             failures += 1;
         }
         println!(
-            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton_behavior={:.3}{} baselines_caught={}{} canary={}",
+            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton={:.3} (behavior {:.3}){} baselines_caught={}{} canary={}",
             if all { "OK  " } else { "FAIL" },
             deterministic,
             ref_v.score,
             if ref_ok { "" } else { " <-- expected 1.0" },
+            skel_v.score,
             skel_behavior,
-            if skel_ok { "" } else { " <-- expected <0.5" },
+            if skel_ok { "" } else { " <-- expected <1.0" },
             baselines_ok,
             baseline_note,
             canary_ok,
