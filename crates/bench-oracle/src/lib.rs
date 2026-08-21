@@ -48,6 +48,12 @@ pub struct GradeSpec<'a> {
     pub max_unsafe: Option<u32>,
     /// L3 AST constraint: forbidden type/function paths (`RefCell`, `transmute`).
     pub forbidden_paths: Vec<String>,
+    /// L3 constraint: run `cargo clippy --lib` on the answer and score its
+    /// cleanliness (docs/03 — the idiomaticity signal). `false` skips it.
+    pub check_clippy: bool,
+    /// Clippy lints not counted against cleanliness, e.g.
+    /// `"clippy::needless_range_loop"`.
+    pub clippy_allow: Vec<String>,
 }
 
 /// Grade one model response for one instance.
@@ -226,6 +232,40 @@ pub fn grade(
         constraint.recompute();
     }
 
+    // ---- L3 constraint: clippy (idiomaticity, docs/03) ----
+    // The dominant signal for `idiom-refactor`: non-idiomatic code compiles and is
+    // behaviourally correct, so only clippy distinguishes it. Runs on the answer's
+    // library only (`--lib`), so the hidden test targets never contribute lints.
+    if spec.check_clippy {
+        let mut args: Vec<String> = vec![
+            "clippy".into(),
+            "--lib".into(),
+            "--offline".into(),
+            "--message-format=json".into(),
+        ];
+        if !spec.clippy_allow.is_empty() {
+            args.push("--".into());
+            for lint in &spec.clippy_allow {
+                args.push("-A".into());
+                args.push(lint.clone());
+            }
+        }
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let out = run_cargo(&policy, &arg_refs)?;
+        if out.timed_out {
+            flags.push("timeout:clippy".into());
+        }
+        let lints = parse_clippy_lints(&out.stdout);
+        let clean = lints.is_empty();
+        constraint.clippy_clean = Some(clean);
+        if !clean {
+            constraint
+                .violations
+                .push(format!("clippy: {}", lints.join(", ")));
+        }
+        constraint.recompute();
+    }
+
     // Failure class, most-specific first: compiled, so it is a behaviour (unit
     // or differential), then constraint, then clean.
     let failure_class = if behavior.score.map(|s| s < 1.0).unwrap_or(true) {
@@ -357,6 +397,43 @@ fn parse_diagnostics(stdout: &str) -> (Vec<String>, u32) {
     (codes, warns)
 }
 
+/// Parse `cargo clippy --message-format=json` output for the clippy lint codes it
+/// emitted at `warning` level — the `clippy::*` codes only, so ordinary rustc
+/// warnings (unused variables) do not count against idiomaticity. Deduplicated;
+/// empty means clippy-clean. Allowed lints were suppressed by `-A` upstream and so
+/// never appear here.
+fn parse_clippy_lints(stdout: &str) -> Vec<String> {
+    let mut lints = Vec::new();
+    for line in stdout.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("reason").and_then(|r| r.as_str()) != Some("compiler-message") {
+            continue;
+        }
+        let msg = match v.get("message") {
+            Some(m) => m,
+            None => continue,
+        };
+        if msg.get("level").and_then(|l| l.as_str()) != Some("warning") {
+            continue;
+        }
+        if let Some(code) = msg
+            .get("code")
+            .and_then(|c| c.get("code"))
+            .and_then(|c| c.as_str())
+        {
+            if code.starts_with("clippy::") {
+                lints.push(code.to_string());
+            }
+        }
+    }
+    lints.sort();
+    lints.dedup();
+    lints
+}
+
 /// Parse libtest's human summary lines: `test result: ok. 3 passed; 0 failed; …`.
 /// Returns `(passed, passed + failed)` **summed across every section** — a
 /// `cargo test` run emits one summary per target (lib unit tests, each
@@ -459,5 +536,25 @@ mod tests {
     #[test]
     fn no_summary_is_none() {
         assert_eq!(parse_test_summary("error: could not compile"), None);
+    }
+
+    #[test]
+    fn parses_only_clippy_warnings() {
+        // A clippy lint, an ordinary rustc warning (must be ignored), a second
+        // clippy lint, a duplicate clippy lint (deduped), and a non-message line.
+        let json = r#"{"reason":"compiler-message","message":{"level":"warning","code":{"code":"clippy::needless_range_loop"},"message":"x"}}
+{"reason":"compiler-message","message":{"level":"warning","code":{"code":"unused_variables"},"message":"y"}}
+{"reason":"compiler-message","message":{"level":"warning","code":{"code":"clippy::manual_map"},"message":"z"}}
+{"reason":"compiler-message","message":{"level":"warning","code":{"code":"clippy::needless_range_loop"},"message":"dup"}}
+{"reason":"compiler-artifact"}"#;
+        assert_eq!(
+            parse_clippy_lints(json),
+            vec![
+                "clippy::manual_map".to_string(),
+                "clippy::needless_range_loop".to_string()
+            ]
+        );
+        // Clean output → no lints.
+        assert!(parse_clippy_lints(r#"{"reason":"compiler-artifact"}"#).is_empty());
     }
 }

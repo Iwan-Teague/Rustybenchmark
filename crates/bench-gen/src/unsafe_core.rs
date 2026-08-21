@@ -423,7 +423,9 @@ impl Generator for UnsafeCoreFamily {
             // unsafe is REQUIRED here (the signature forces it), so it is not
             // constrained (limit = unlimited). Miri, the real constraint layer for
             // this category, is deferred (docs/04, roadmap P7) — see the module doc.
-            max_unsafe: u32::MAX,
+            max_unsafe: None,
+            check_clippy: false,
+            clippy_allow: Vec::new(),
             forbidden_paths: Vec::new(),
             // docs/04 unsafe-core weights (behaviour-dominant; the constraint slot
             // is miri, deferred, so scoring currently renormalises to behaviour).

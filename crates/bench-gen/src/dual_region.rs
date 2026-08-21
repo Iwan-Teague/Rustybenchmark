@@ -431,7 +431,9 @@ impl Generator for DualRegionFamily {
             behavior_test: "behavior".to_string(),
             differential_test: "differential".to_string(),
             alloc_test: "alloc".to_string(),
-            max_unsafe: 0,
+            max_unsafe: Some(0),
+            check_clippy: false,
+            clippy_allow: Vec::new(),
             forbidden_paths: Vec::new(),
             // borrow-lifetimes is constraint-dominant (docs/04): cloning is
             // behaviourally correct, so the allocation constraint carries the signal.

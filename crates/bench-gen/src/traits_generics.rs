@@ -526,7 +526,9 @@ impl Generator for TraitsGenericsFamily {
             differential_test: "differential".to_string(),
             // Folding into a scalar does not allocate meaningfully: no alloc layer.
             alloc_test: String::new(),
-            max_unsafe: 0,
+            max_unsafe: Some(0),
+            check_clippy: false,
+            clippy_allow: Vec::new(),
             forbidden_paths: Vec::new(),
             // traits-generics uses docs/04 default weights (L1 + signature match
             // dominate via the compile gate and the differential).

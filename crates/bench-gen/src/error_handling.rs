@@ -499,7 +499,9 @@ impl Generator for ErrorHandlingFamily {
             differential_test: "differential".to_string(),
             // No allocation constraint: parsing legitimately allocates.
             alloc_test: String::new(),
-            max_unsafe: 0,
+            max_unsafe: Some(0),
+            check_clippy: false,
+            clippy_allow: Vec::new(),
             forbidden_paths: vec!["unwrap".to_string(), "expect".to_string()],
             // error-handling is behaviour-emphasis (docs/04 default weights).
             weights: (0.70, 0.20, 0.10),

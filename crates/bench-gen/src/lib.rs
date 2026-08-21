@@ -101,10 +101,18 @@ pub struct GeneratedTask {
     pub behavior_test: String,
     pub differential_test: String,
     pub alloc_test: String,
-    /// L3 AST constraint.
-    pub max_unsafe: u32,
+    /// L3 AST constraint: max `unsafe` usages. `None` opts the check out entirely
+    /// (the constraint layer then reflects only the other checks) — used where
+    /// `unsafe` is irrelevant (`idiom-refactor`) or mandatory (`unsafe-core`).
+    pub max_unsafe: Option<u32>,
     /// L3 AST constraint: forbidden type/function/method names.
     pub forbidden_paths: Vec<String>,
+    /// L3 constraint: run `cargo clippy` on the answer and score its cleanliness
+    /// (docs/03 — the idiomaticity signal, dominant for `idiom-refactor`).
+    pub check_clippy: bool,
+    /// Clippy lints to allow (not counted against cleanliness), e.g.
+    /// `clippy::needless_range_loop` where an index loop is legitimate.
+    pub clippy_allow: Vec<String>,
     /// Per-category weights (behavior, constraint, quality).
     pub weights: (f32, f32, f32),
 }

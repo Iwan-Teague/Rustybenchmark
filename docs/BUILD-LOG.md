@@ -8,6 +8,34 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · The clippy constraint oracle (L3) — the idiomaticity signal
+
+Built the grading layer `idiom-refactor` needs. docs/03 puts clippy in **L3 constraint** (not L4): non-
+idiomatic code compiles and is behaviourally correct, so clippy is the *only* thing that distinguishes it
+(docs/03 line 84, "Clippy catches all of it"). The `ConstraintScore.clippy_clean` field already existed but
+was never populated; now it is.
+
+- `bench-oracle` `grade()` gains a clippy stage (`GradeSpec.check_clippy` / `clippy_allow`): after L1
+  compiles, it runs `cargo clippy --lib --offline --message-format=json` (with `-A <lint>` for any allowed
+  lints) on the answer's library only — so the hidden test targets never contribute lints — and parses the
+  JSON for `clippy::*` **warning** codes. `parse_clippy_lints` counts only `clippy::` codes, so ordinary
+  rustc warnings (unused vars) don't touch idiomaticity; empty ⇒ `clippy_clean = true`, else the lint names
+  land in `violations`. It feeds `ConstraintScore` (already averaged into the L3 layer score, weighted by
+  the per-category `constraint` weight), and — per Q28 — **not** `passed()`, since clippy is quality, not
+  correctness.
+- `GeneratedTask.max_unsafe` became `Option<u32>` so a family can opt the unsafe check *out* entirely
+  (`None`), keeping the constraint layer clippy-only where `unsafe` is irrelevant (`idiom-refactor`) — and
+  this also removes the spurious constraint credit `raw-ptr` used to get from its `u32::MAX` limit (now
+  `None`: it grades on behaviour alone, no phantom 1.0 constraint term). All 12 families updated
+  mechanically (`Some(0)` / `None`); every existing family's grading is unchanged (none sets `check_clippy`).
+
+Part 1 of two. The clippy stage is dormant until a family enables it — the next entry (`idiom-refactor`)
+is its first user and its end-to-end test. Direct coverage here: a `parse_clippy_lints` unit test (clippy
+warnings kept, rustc warnings dropped, deduped). 159 workspace tests (+1); clippy `-D warnings` and
+`cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Generic construction-invariant drift-guard over the whole registry
 
 With twelve families and more coming, added a single `cargo test` that loops over `FAMILY_IDS` and asserts

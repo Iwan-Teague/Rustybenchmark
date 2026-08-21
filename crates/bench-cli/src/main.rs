@@ -130,6 +130,8 @@ struct Task {
     alloc_test: Option<String>,
     max_unsafe: Option<u32>,
     forbidden_paths: Vec<String>,
+    check_clippy: bool,
+    clippy_allow: Vec<String>,
 }
 
 const GENERIC_SYSTEM_PROMPT: &str = "You are an expert Rust programmer. Respond with a SINGLE ```rust code block containing the complete contents of src/lib.rs. No prose, no explanation, no other text.";
@@ -287,6 +289,9 @@ fn load_frozen(task_dir: &Path) -> Result<Task, Box<dyn std::error::Error>> {
         alloc_test: ocfg.alloc_test,
         max_unsafe: ccfg.max_unsafe,
         forbidden_paths: ccfg.forbidden_paths,
+        // Frozen tasks do not declare clippy grading (no idiom-refactor frozen task).
+        check_clippy: false,
+        clippy_allow: Vec::new(),
     })
 }
 
@@ -321,8 +326,10 @@ fn task_from_generated(gt: &bench_gen::GeneratedTask) -> Task {
         behavior_test: non_empty(&gt.behavior_test),
         differential_test: non_empty(&gt.differential_test),
         alloc_test: non_empty(&gt.alloc_test),
-        max_unsafe: Some(gt.max_unsafe),
+        max_unsafe: gt.max_unsafe,
         forbidden_paths: gt.forbidden_paths.clone(),
+        check_clippy: gt.check_clippy,
+        clippy_allow: gt.clippy_allow.clone(),
     }
 }
 
@@ -357,6 +364,8 @@ fn grade(
         limits,
         max_unsafe: task.max_unsafe,
         forbidden_paths: task.forbidden_paths.clone(),
+        check_clippy: task.check_clippy,
+        clippy_allow: task.clippy_allow.clone(),
     };
     Ok(bench_oracle::grade(&task.instance, response, &spec, &ws)?)
 }

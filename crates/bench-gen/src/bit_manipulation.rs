@@ -370,7 +370,9 @@ impl Generator for BitManipulationFamily {
             differential_test: "differential".to_string(),
             // A scalar bit transform does not allocate: no alloc constraint.
             alloc_test: String::new(),
-            max_unsafe: 0,
+            max_unsafe: Some(0),
+            check_clippy: false,
+            clippy_allow: Vec::new(),
             forbidden_paths: Vec::new(),
             weights: (0.70, 0.20, 0.10),
         }
