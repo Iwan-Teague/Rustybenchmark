@@ -8,6 +8,36 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · docs/12 schema reconciliation — the journal line, matched to what the code emits
+
+The schemas were drifting behind the code again — the exact recurring defect the docs call out a process
+note against ([OPEN-QUESTIONS.md](OPEN-QUESTIONS.md), "schema drift"). docs/12's `journal.jsonl` block is
+the *design target*; what `run` / `run-suite` actually write had diverged in three ways and grown several
+fields the doc never mentioned. Rather than silently rewrite the target (some divergences are genuine
+naming decisions to resolve, not typos), added a precise **"Current emission (implemented subset)"**
+subsection that documents the real line — `bench-cli`'s `JournalLine` embedding `bench-core`'s
+`OracleVector` — and lists every divergence:
+
+- **`kind` vs `set`**: the code emits `"kind"` for the core/probe label (and `bench-stats` reads it, and
+  journals exist with it), while the target says `set`. Flagged as a breaking rename to reconcile, not
+  quietly picked.
+- **`oracle.constraint`** is the real `ConstraintScore` (`alloc_ok`/`clippy_clean`/`fmt_ok`/`unsafe_blocks`/
+  `unsafe_ok`/`paths_ok`/`violations`/`score`), not the target's older `{clippy, fmt, unsafe_blocks,
+  forbidden, score}` sketch.
+- `model` is a nested object with `base_url`; `sandbox` and `epoch` are emitted; `failure_class` is present
+  both top-level and inside `oracle`; the stage-scoped timeout/`no_summary` flags are documented.
+- **Not emitted yet** (target fields awaiting their phase): `run_id`, `subcategory`, `batch_nonce`, `canary`,
+  `attempt`, `completed_at`, `compile_rate_contrib`, `first_try_score`, `classified`, `cached_tokens`,
+  `oracle.quality` (L4), and the richer `cost` timings.
+
+And a **guard against the next drift**: a `bench-stats` round-trip test (`parses_current_emission_journal_line`)
+pins that the documented line deserialises into `Record`, so a reader change that breaks it fails CI. Docs +
+one test, no grading run; `bench-stats` 27 tests, clippy `-D warnings` / `cargo fmt --check` clean.
+(Chosen as a collision-free chunk while other agents author families in `bench-gen` and add the miri stage
+in a worktree — this touches only docs/12 and `bench-stats`.)
+
+---
+
 ## 2026-08-21 · Fifteenth family: `idiom-counter` — the second idiom-refactor family, a different lint
 
 `idiom-refactor` had exactly one family (`idiom-loop`, built around

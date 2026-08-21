@@ -1469,6 +1469,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_current_emission_journal_line() {
+        // Pins docs/12's "Current emission" block: the exact line `run`/`run-suite`
+        // write must deserialise into `Record`. A drift in the reader breaks CI —
+        // that is the point (schemas were drifting behind the code).
+        let line = r#"{"schema":1,"unit_id":"blake3:x","task_id":"window-op/0000000000000000","category":"borrow-lifetimes","seed":8412739123,"index":0,"epoch":"2026-08","kind":"core","segment":0,"segment_position":0,"model":{"name":"m","base_url":"u","finish_reason":"stop"},"sandbox":"seatbelt","oracle":{"apply_ok":true,"compile_ok":false,"error_codes":["E0499"],"warn_count":2,"diagnostic_completeness":"full","behavior":{"unit":null,"property":null,"differential":null,"score":null},"constraint":{"alloc_ok":null,"clippy_clean":null,"fmt_ok":null,"unsafe_blocks":null,"unsafe_ok":null,"paths_ok":null,"violations":[],"score":null},"score":0.0,"failure_class":"borrowck","flags":[]},"cost":{"prompt_tokens":1842,"completion_tokens":611,"gen_ms":30410,"grade_ms":1880},"failure_class":"borrowck"}"#;
+        let recs = parse_journal(line).unwrap();
+        assert_eq!(recs.len(), 1);
+        let r = &recs[0];
+        assert_eq!(r.kind, "core");
+        assert_eq!(r.epoch, "2026-08");
+        assert_eq!(r.segment, Some(0));
+        assert_eq!(r.segment_position, Some(0));
+        assert_eq!(r.family(), "window-op");
+        assert_eq!(r.cost.gen_ms, 30410);
+        assert!(!r.oracle.compile_ok);
+        assert_eq!(
+            r.oracle.diagnostic_completeness,
+            bench_core::DiagnosticCompleteness::Full
+        );
+        assert_eq!(r.oracle.error_codes, vec!["E0499".to_string()]);
+        assert_eq!(r.oracle.failure_class, bench_core::FailureClass::Borrowck);
+    }
+
+    #[test]
     fn throughput_excludes_segment_warmup() {
         // Units at segment position < SEGMENT_WARMUP_UNITS are dropped from the
         // timing aggregate (docs/08). One cold lead unit (position 0) followed by

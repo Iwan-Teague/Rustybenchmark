@@ -122,7 +122,67 @@ Every on-disk and on-wire schema, in one place. All carry an integer `schema` fi
 }
 ```
 
-`flags` may contain: `timeout`, `network_attempt`, `context_overflow`, `budget_overflow`, `format_error`, `nondeterministic_repeat`, `skipped_context`, `perf_unavailable`.
+`flags` may contain: `timeout`, `network_attempt`, `context_overflow`, `budget_overflow`, `format_error`, `nondeterministic_repeat`, `skipped_context`, `perf_unavailable`. The harness also emits stage-scoped
+timeout flags (`timeout:build`, `timeout:test`, `timeout:differential`, `timeout:alloc`, `timeout:clippy`)
+and no-summary flags (`behavior:no_summary`, `differential:no_summary`, `alloc:no_summary`).
+
+### Current emission (implemented subset)
+
+The block above is the design target. What `rustybench run` / `run-suite` actually write **today** is a
+subset, and in three places the emitted names have drifted from the target — recorded here so the schema
+stops trailing the code (the recurring defect noted in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)). The emitted
+line is exactly `bench-cli`'s `JournalLine` embedding `bench-core`'s `OracleVector`:
+
+```json
+{
+  "schema": 1,
+  "unit_id": "blake3:...",
+  "task_id": "window-op/0000000000000000",
+  "category": "borrow-lifetimes",
+  "seed": 8412739123,
+  "index": 0,
+  "epoch": "2026-08",              // emitted; "local" for single-unit `run`
+  "kind": "core",                  // <-- emitted name for the target's `set` (core | probe)
+  "segment": 0,                    // omitted (skip_serializing_if) for single-unit `run`
+  "segment_position": 0,           // omitted for single-unit `run`
+  "model": { "name": "...", "base_url": "...", "finish_reason": "stop" },  // nested, not top-level
+  "sandbox": "seatbelt",           // seatbelt | unsupported -- was model code contained? (docs/10)
+  "oracle": {
+    "apply_ok": true,
+    "compile_ok": false,
+    "error_codes": ["E0499"],
+    "warn_count": 2,
+    "diagnostic_completeness": "full",   // full | typeck_only
+    "behavior":   { "unit": null, "property": null, "differential": null, "score": null },
+    "constraint": { "alloc_ok": null, "clippy_clean": null, "fmt_ok": null,
+                    "unsafe_blocks": null, "unsafe_ok": null, "paths_ok": null,
+                    "violations": [], "score": null },
+    "score": 0.0,
+    "failure_class": "borrowck",
+    "flags": []
+  },
+  "cost": { "prompt_tokens": 1842, "completion_tokens": 611, "gen_ms": 30410, "grade_ms": 1880 },
+  "failure_class": "borrowck"      // also present top-level (mirrors oracle.failure_class)
+}
+```
+
+Divergences from the target block, to reconcile deliberately (not silently):
+
+- **`kind` vs `set`.** The code committed to `kind` (`bench-stats` reads it, journals exist with it), so a
+  rename is a breaking change to on-disk data; the target says `set`. One of the two must move — tracked,
+  not quietly resolved here.
+- **`oracle.constraint`** is the real `ConstraintScore` — `alloc_ok` / `clippy_clean` / `fmt_ok` /
+  `unsafe_blocks` / `unsafe_ok` / `paths_ok` / `violations` / `score` — not the target's
+  `{clippy, fmt, unsafe_blocks, forbidden, score}` sketch.
+- **`model` is nested** and carries `base_url`; `sandbox` and `epoch` are emitted; `failure_class` appears
+  both top-level and inside `oracle`.
+- **Not emitted yet** (present in the target, awaiting the phases that produce them): `run_id`,
+  `subcategory`, `batch_nonce`, `canary`, `attempt`, `completed_at`, `compile_rate_contrib`, `first_try_score`,
+  `classified`, `cached_tokens`, `oracle.quality` (L4), and the `cost` fields `prefill_ms` / `build_ms` /
+  `peak_accel_mem_mb` / `peak_host_rss_mb` (`run` records only the four costs above).
+
+A round-trip test in `bench-stats` (`parses_current_emission_journal_line`) pins that this exact shape
+deserialises into `Record`, so a drift in the reader breaks CI.
 
 ## `hw.json` — static inventory
 
