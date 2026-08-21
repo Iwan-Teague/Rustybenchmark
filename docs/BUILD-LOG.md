@@ -8,6 +8,35 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · The Q14 gate, automated — `clippy --fix` must not solve the instance
+
+Promoted the previous entry's manually-measured Q14 property into a real `validate-family` gate, so it can
+never silently regress if `idiom-refactor`'s transform catalogue changes. Q14 requires that a family whose
+signal is clippy not be *trivially auto-solvable* by `cargo clippy --fix` — otherwise it measures
+transcription, not reasoning.
+
+- `bench-oracle` gains `clippy_fix_remaining_lints(files, allow, limits, ws)`: it materialises the
+  model-visible skeleton into a fresh sandboxed workspace, runs `cargo clippy --fix --allow-dirty
+  --allow-no-vcs --lib` on it (applying every machine-applicable fix), then re-lints and returns the
+  clippy lints that **remain**. Empty ⇒ `--fix` produced clean code ⇒ trivially auto-solvable.
+- `validate-family` runs it for clippy-graded families (`check_clippy`) and folds the result into the
+  per-seed verdict: the seed fails unless lints survive `--fix`.
+
+Live on `idiom-loop`:
+
+```
+seed 0: OK … clippy_fix_safe=true (1 lint(s) survive --fix)
+```
+
+Every seed keeps its `needless_range_loop` after `clippy --fix` (the suggestion is not machine-applicable),
+so the model must genuinely reason about the iterator rewrite — now proven automatically each run rather
+than by a one-off manual spike. A family that accidentally chose a *machine-applicable* lint would fail this
+gate loudly (`clippy_fix_safe=false`). The check is a no-op for the twelve non-clippy families. The helper
+is exercised end-to-end by `validate-family` (like `grade()` itself, it needs the sandboxed toolchain, so
+it has no pure unit test). 166 workspace tests; clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Thirteenth family: `idiom-loop` (`idiom-refactor`) — the fifth core category, and the first compositional one
 
 The last uncovered docs/04 core category, and the only **compositional** family: instead of ablating a

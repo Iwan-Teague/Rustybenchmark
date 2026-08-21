@@ -727,14 +727,49 @@ fn validate_family(
 
         let canary_ok = gt.prompt.contains(&gt.canary);
 
+        // Q14 gate — clippy-graded families only: `cargo clippy --fix` must NOT
+        // mechanically solve the given (skeleton) code, or the task is trivially
+        // auto-solvable and measures transcription, not reasoning. Passes iff clippy
+        // lints remain after `--fix`.
+        let (clippy_fix_ok, clippy_fix_note) = if task.check_clippy {
+            let fix_ws = scratch.join(format!("fix-{seed}"));
+            if fix_ws.exists() {
+                std::fs::remove_dir_all(&fix_ws)?;
+            }
+            std::fs::create_dir_all(&fix_ws)?;
+            let limits = bench_sandbox::Limits {
+                wall: std::time::Duration::from_secs(120),
+                cpu: std::time::Duration::from_secs(120 * 30),
+                address_space: None,
+            };
+            let remaining = bench_oracle::clippy_fix_remaining_lints(
+                &gt.files,
+                &task.clippy_allow,
+                limits,
+                &fix_ws,
+            )?;
+            let ok = !remaining.is_empty();
+            let note = if ok {
+                format!(
+                    " clippy_fix_safe=true ({} lint(s) survive --fix)",
+                    remaining.len()
+                )
+            } else {
+                " clippy_fix_safe=false <-- clippy --fix solves it (Q14)".to_string()
+            };
+            (ok, note)
+        } else {
+            (true, String::new())
+        };
+
         let ref_ok = ref_v.score >= 0.99;
         let skel_ok = caught(&skel_v);
-        let all = deterministic && ref_ok && skel_ok && baselines_ok && canary_ok;
+        let all = deterministic && ref_ok && skel_ok && baselines_ok && canary_ok && clippy_fix_ok;
         if !all {
             failures += 1;
         }
         println!(
-            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton={:.3} (behavior {:.3}){} baselines_caught={}{} canary={}",
+            "  seed {seed:>3}: {} determinism={} reference={:.3}{} skeleton={:.3} (behavior {:.3}){} baselines_caught={}{} canary={}{}",
             if all { "OK  " } else { "FAIL" },
             deterministic,
             ref_v.score,
@@ -745,6 +780,7 @@ fn validate_family(
             baselines_ok,
             baseline_note,
             canary_ok,
+            clippy_fix_note,
         );
     }
 

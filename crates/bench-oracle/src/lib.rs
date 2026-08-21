@@ -291,6 +291,67 @@ pub fn grade(
     Ok(v)
 }
 
+/// Q14 gate helper: run `cargo clippy --fix` on the given files and report the
+/// clippy lints that **remain** afterwards.
+///
+/// Materialises `files` (the model-visible skeleton — Cargo.toml + the answer's
+/// `src/lib.rs`) into an empty `workspace`, applies clippy's machine-applicable
+/// fixes to the library in place, then re-lints. An **empty** result means
+/// `clippy --fix` produced clippy-clean code — i.e. the instance is *trivially
+/// auto-solvable*, which a `clippy`-graded family (e.g. `idiom-refactor`) must not
+/// be (docs/OPEN-QUESTIONS.md Q14: "clippy --fix must not solve the instance").
+/// A non-empty result means the model must genuinely reason about the rewrite.
+pub fn clippy_fix_remaining_lints(
+    files: &std::collections::BTreeMap<std::path::PathBuf, String>,
+    clippy_allow: &[String],
+    limits: bench_sandbox::Limits,
+    workspace: &Path,
+) -> Result<Vec<String>, OracleError> {
+    if workspace.read_dir()?.next().is_some() {
+        return Err(OracleError::DirtyWorkspace(workspace.display().to_string()));
+    }
+    for (rel, contents) in files {
+        write_under(workspace, rel, contents)?;
+    }
+    let policy = bench_sandbox::Policy::for_workspace(workspace)?.with_limits(limits);
+
+    // `-A <lint>` for allowed lints so `--fix`/lint never touch them.
+    let allow_flags = |args: &mut Vec<String>| {
+        if !clippy_allow.is_empty() {
+            args.push("--".into());
+            for l in clippy_allow {
+                args.push("-A".into());
+                args.push(l.clone());
+            }
+        }
+    };
+
+    // Apply machine-applicable fixes in place (best-effort — ignore its status).
+    let mut fix = vec![
+        "clippy".to_string(),
+        "--fix".into(),
+        "--allow-dirty".into(),
+        "--allow-no-vcs".into(),
+        "--lib".into(),
+        "--offline".into(),
+    ];
+    allow_flags(&mut fix);
+    let fix_refs: Vec<&str> = fix.iter().map(|s| s.as_str()).collect();
+    let _ = run_cargo(&policy, &fix_refs)?;
+
+    // Re-lint the (possibly rewritten) library and report what clippy still finds.
+    let mut lint = vec![
+        "clippy".to_string(),
+        "--lib".into(),
+        "--offline".into(),
+        "--message-format=json".into(),
+    ];
+    allow_flags(&mut lint);
+    let lint_refs: Vec<&str> = lint.iter().map(|s| s.as_str()).collect();
+    let out = run_cargo(&policy, &lint_refs)?;
+    Ok(parse_clippy_lints(&out.stdout))
+}
+
 /// Extract the answer from a model response. Prefers the first fenced code
 /// block (``` optionally tagged `rust`); falls back to the whole trimmed
 /// response when the model returned bare code.
