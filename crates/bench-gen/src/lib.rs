@@ -26,6 +26,7 @@ pub mod epoch;
 pub mod error_handling;
 pub mod generic_select;
 pub mod grid_reduce;
+pub mod idiom_counter;
 pub mod idiom_refactor;
 pub mod raw_ptr_mut;
 pub mod seq_transform;
@@ -205,6 +206,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "generic-select",
     "checked-eval",
     "idiom-loop",
+    "idiom-counter",
 ];
 
 /// Look up a family by id.
@@ -224,6 +226,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "generic-select" => Some(Box::new(generic_select::GenericSelectFamily)),
         "checked-eval" => Some(Box::new(checked_eval::CheckedEvalFamily)),
         "idiom-loop" => Some(Box::new(idiom_refactor::IdiomRefactorFamily)),
+        "idiom-counter" => Some(Box::new(idiom_counter::IdiomCounterFamily)),
         _ => None,
     }
 }
@@ -388,6 +391,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("idiom-loop").unwrap().as_ref(), 4000),
             16
+        );
+        // idiom-counter = 3 weights x 4 maps (the second idiom-refactor family).
+        assert_eq!(
+            spec_diversity(family("idiom-counter").unwrap().as_ref(), 4000),
+            12
         );
     }
 }

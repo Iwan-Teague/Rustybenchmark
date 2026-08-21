@@ -8,6 +8,68 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Fifteenth family: `idiom-counter` — the second idiom-refactor family, a different lint
+
+`idiom-refactor` had exactly one family (`idiom-loop`, built around
+`clippy::needless_range_loop`). This adds a second, built on a different
+detectable non-idiom: the **explicit running counter** —
+`let mut i = 0; for &x in xs { … i += 1; }` — which trips
+`clippy::explicit_counter_loop`.
+
+Same de-idiomatisation contract as `idiom-loop`: the skeleton is *behaviourally
+complete* and only clippy distinguishes it; weights are docs/04's
+behavior .30 / constraint .60 / quality .10 (`check_clippy=true`,
+`max_unsafe=None`).
+
+Two axes × = **12 distinct specs**: how index contributes (**weight**: linear
+`i+1` / reverse `n-i` / parity `±1`) and what each element becomes before
+weighting (**map**: identity / double / square / negate). The idiomatic answers:
+`.enumerate()` for linear, `.rev().enumerate()` for reverse (the reversed
+position *is* the weight — no length arithmetic), an `if i % 2` inside the
+closure for parity.
+
+**Q14 verified twice over.** Before authoring, both directions were measured in
+a scratch crate:
+
+- all three de-idiom shapes fire `explicit_counter_loop`, whose suggestion is
+  MaybeIncorrect — after `cargo clippy --fix` every `i += 1;` survives (and the
+  automated gate confirms per-seed below);
+- all 12 emitted references are clippy-clean under `-D warnings` (dumped and
+  linted verbatim), so the reference scores 1.000 while the unchanged counter
+  loop scores ~0.33.
+
+Baselines unchanged from `idiom-loop`: the load-bearing `unchanged` (correct,
+unidiomatic) plus `const-zero`; the pinned canonical `[3,1,4,2]` is non-zero
+under all 12 spec combinations.
+
+```
+validate-family idiom-counter: 8 seed(s)
+  seed   0: OK   determinism=true reference=1.000 skeleton=0.333
+                 (behavior 1.000) baselines_caught=true canary=true
+                 clippy_fix_safe=true (1 lint(s) survive --fix)
+  seed   1..7: same OK shape; seeds 2 and 6 report 2 surviving lints  [×8]
+  anti-twin  view (prompt+skeleton): min=0.286 median=0.399 near-twin pairs (<0.25)=0/28
+  anti-twin  reference (solution) : min=0.120 median=0.833 near-twin pairs (<0.25)=2/28
+  capacity   view=8+ (asked 8, rejected 0)  reference=15
+  spec-diversity: 12 distinct skills (the authoritative task-diversity measure — Q31)
+  distinct-skills epoch: served 8 seed(s) covering 8 distinct skills
+all gates passed
+```
+
+Honest caveats:
+
+- Skeleton composite 0.333 with behavior 1.000 is the family working as
+  designed — the model's starting code is correct, and only the clippy layer
+  separates it from full credit.
+- Reference anti-twin min=0.120 (two near-twin pairs of 28): with one shared
+  signature and three weight strategies, two seeds' references can be close;
+  view-distance stays clean and spec-diversity (12) is the gated measure.
+- Like `idiom-loop`, there is no unsafe layer here by design.
+
+186 workspace tests (+8); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Fourteenth family: `raw-ptr-mut` — unsafe *writes*, the second unsafe-core family (P7)
 
 The corpus had exactly one unsafe-core family (`raw-ptr`, reads through
