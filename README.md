@@ -17,13 +17,13 @@ Written in Rust. Runs on consumer hardware. Talks to any OpenAI-compatible endpo
 
 **Building — the generation + grading + aggregation half works end to end (macOS).** The design phase (17 docs, 10 ADRs, 6 adversarial review rounds) is under `docs/`. Code follows the roadmap in [docs/14-roadmap.md](docs/14-roadmap.md); phases P0 (spine), P1 (sandbox), P2 (oracle depth), P3 (generation) and much of P4 (runs, resume, stats) have landed.
 
-**What runs today.** `rustybench run` sends a task — a hand-frozen file or a **seed-generated** one — to any OpenAI-compatible endpoint, grades the response with the real `cargo`/`rustc` toolchain inside a sandbox, and writes a scored JSONL journal line. `run-suite` serves a whole resumable epoch (paired-core + fresh-probe seeds); `stats` folds a journal into capability, pass-rate and cluster-bootstrap CIs; `status` gives progress/ETA. Tasks are generated *solution-first* so the oracle is correct by construction; **twelve families across nine categories** now generate memorisation-measured, correct-by-construction tasks.
+**What runs today.** `rustybench run` sends a task — a hand-frozen file or a **seed-generated** one — to any OpenAI-compatible endpoint, grades the response with the real `cargo`/`rustc` toolchain inside a sandbox, and writes a scored JSONL journal line. `run-suite` serves a whole resumable epoch (paired-core + fresh-probe seeds); `stats` folds a journal into capability, pass-rate and cluster-bootstrap CIs; `status` gives progress/ETA. Tasks are generated *solution-first* so the oracle is correct by construction; **thirteen families across ten categories** now generate memorisation-measured, correct-by-construction tasks.
 
 ```
 crates/
   bench-core        types, scoring, rustc-code → FailureClass       (pure, no I/O)
-  bench-gen         seed → task (12 families) · anti-twin + spec-diversity · epoch sampler
-  bench-oracle      L0 apply · L1 compile · L2 behavior/differential · L3 syn AST
+  bench-gen         seed → task (13 families) · anti-twin + spec-diversity · epoch sampler
+  bench-oracle      L0 apply · L1 compile · L2 behavior/differential · L3 syn AST + clippy
   bench-sandbox     macOS seatbelt: no network, confined writes, wall-clock kill
   bench-model       OpenAI-compatible /v1/chat/completions client
   bench-stats       journal → capability · pass-rate · wild cluster bootstrap · McNemar · ICC · throughput
@@ -34,14 +34,14 @@ crates/
 Build and try it:
 
 ```bash
-cargo test                                                                    # 157 tests across the crates
-cargo run -p bench-cli -- validate-family --family stack-machine --seeds 8     # prove a family's generator is sound
+cargo test                                                                    # 166 tests across the crates
+cargo run -p bench-cli -- validate-family --family idiom-loop --seeds 8        # prove a family's generator is sound
 cargo run -p bench-cli -- run --family error-handling --seed 42 --model http://localhost:8080
 ```
 
 **OS:** grading runs sandboxed on **macOS** (seatbelt). Linux/Windows containment is not built yet (roadmap gate G1).
 
-Landed since P3: the statistics layer (`bench-stats` — capability, pass-rate, studentised wild cluster-bootstrap CIs, McNemar, the precomputation sign test, ICC, throughput), the run protocol (epoch orchestration, resume, `status`, `segment_position` + cache-warmth exclusion), and the Q28/Q29 decisions behind them (the structural pass predicate; the estimation spec). Still to come, per the roadmap: hardware profiling and upload (P1 hw / P6); the full 272-family corpus (P7), of which **12** exist across 9 categories (4 of the 5 core categories are covered; `idiom-refactor` awaits the compositional archetype and `unsafe-core` grades without miri until P7); and the mined `wild` suite.
+Landed since P3: the statistics layer (`bench-stats` — capability, pass-rate, studentised wild cluster-bootstrap CIs, McNemar, the precomputation sign test, ICC, throughput), the run protocol (epoch orchestration, resume, `status`, `segment_position` + cache-warmth exclusion), and the Q28/Q29 decisions behind them (the structural pass predicate; the estimation spec). Still to come, per the roadmap: hardware profiling and upload (P1 hw / P6); the full 272-family corpus (P7), of which **13** exist across 10 categories — **all 5 core categories are now covered** (`unsafe-core` grades without miri until P7); L4 quality (mutation/perf); and the mined `wild` suite.
 
 ## Read order
 
