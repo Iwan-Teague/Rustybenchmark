@@ -495,7 +495,7 @@ fn design_effect(m: f64, icc: f64) -> f64 {
 // Report
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct CategoryReport {
     pub category: String,
     pub mean_score: f64,
@@ -517,7 +517,7 @@ pub struct CategoryReport {
     pub design_effect: Option<f64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct StatReport {
     pub capability_score: f64,
     /// Overall CI at level `1 − ALPHA` (not simultaneity-adjusted — it is one figure).
@@ -628,6 +628,74 @@ pub fn report_with(records: &[Record], iters: usize) -> StatReport {
         simultaneous_k: k,
         pooled_icc,
         throughput,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics — apply/compile rates and the failure-class / error-code histograms
+// ---------------------------------------------------------------------------
+
+/// The per-model diagnostic aggregates (docs/03): apply/compile rates and the
+/// failure-class + rustc-error-code histograms — the signal that says *which part
+/// of Rust* a model is weak at, which no general-purpose benchmark produces.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DiagnosticsReport {
+    /// Scored (core) units the diagnostics are computed over.
+    pub units: usize,
+    /// Fraction of core units whose response applied (L0). A model that solves the
+    /// problem but cannot emit an extractable answer is a distinct failure (docs/03).
+    pub apply_rate: f64,
+    /// Fraction of *applied* core units that compiled (L1).
+    pub compile_rate: f64,
+    /// `failure_class → count`, most frequent first.
+    pub failure_classes: Vec<(String, usize)>,
+    /// `rustc error code → count` across core units, most frequent first. Borrow
+    /// failures are a lower bound (typeck aborts before borrowck — docs/03).
+    pub error_codes: Vec<(String, usize)>,
+}
+
+/// Compute [`DiagnosticsReport`] over the **core** units only (the fresh probe is
+/// never reported, ADR-0009 — matching [`report`]).
+pub fn diagnostics(records: &[Record]) -> DiagnosticsReport {
+    let core: Vec<&Record> = records.iter().filter(|r| r.kind == "core").collect();
+    let units = core.len();
+    let applied = core.iter().filter(|r| r.oracle.apply_ok).count();
+    let compiled = core
+        .iter()
+        .filter(|r| r.oracle.apply_ok && r.oracle.compile_ok)
+        .count();
+    let apply_rate = if units > 0 {
+        applied as f64 / units as f64
+    } else {
+        0.0
+    };
+    let compile_rate = if applied > 0 {
+        compiled as f64 / applied as f64
+    } else {
+        0.0
+    };
+
+    let mut fc: BTreeMap<String, usize> = BTreeMap::new();
+    let mut codes: BTreeMap<String, usize> = BTreeMap::new();
+    for r in &core {
+        *fc.entry(r.oracle.failure_class.as_str().to_string())
+            .or_default() += 1;
+        for c in &r.oracle.error_codes {
+            *codes.entry(c.clone()).or_default() += 1;
+        }
+    }
+    // Sort by descending count, then name for a deterministic order.
+    let sort_desc = |m: BTreeMap<String, usize>| -> Vec<(String, usize)> {
+        let mut v: Vec<(String, usize)> = m.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        v
+    };
+    DiagnosticsReport {
+        units,
+        apply_rate,
+        compile_rate,
+        failure_classes: sort_desc(fc),
+        error_codes: sort_desc(codes),
     }
 }
 
@@ -895,7 +963,7 @@ pub fn detect(records: &[Record], threshold: f64) -> Vec<DetectorReport> {
 /// What the machine delivered while running the suite. Computed over **every executed
 /// unit** (core *and* probe both consume wall-clock time), except `passes_per_hour`,
 /// which counts only scored core passes (the probe is never scored, ADR-0009).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ThroughputReport {
     /// Executed units that carried timing.
     pub units: usize,
@@ -1344,6 +1412,47 @@ mod tests {
         assert!((t.passes_per_hour - 480.0).abs() < 1e-3);
         // Synthetic records (no timing) → None.
         assert!(throughput(&[Record::synthetic("c", "f", 0, 1.0, true)]).is_none());
+    }
+
+    #[test]
+    fn diagnostics_rates_and_histograms() {
+        use bench_core::FailureClass;
+        let mk = |compile: bool, fc: FailureClass, codes: &[&str]| {
+            let mut r = Record::synthetic("c", "f", 0, if compile { 0.5 } else { 0.0 }, false);
+            r.oracle.apply_ok = true;
+            r.oracle.compile_ok = compile;
+            r.oracle.failure_class = fc;
+            r.oracle.error_codes = codes.iter().map(|s| s.to_string()).collect();
+            r
+        };
+        let mut recs = vec![
+            mk(false, FailureClass::Borrowck, &["E0499"]),
+            mk(false, FailureClass::Borrowck, &["E0499", "E0502"]),
+            mk(true, FailureClass::Logic, &[]),
+            mk(true, FailureClass::None, &[]),
+        ];
+        // A non-applying core unit (didn't emit extractable code).
+        let mut na = Record::synthetic("c", "f", 0, 0.0, false);
+        na.oracle.apply_ok = false;
+        na.oracle.compile_ok = false;
+        na.oracle.failure_class = FailureClass::Other;
+        recs.push(na);
+        // A probe unit that must be ignored (ADR-0009).
+        recs.push(Record::synthetic_unit(
+            "c", "f", "e", "probe", 0, 0.0, false,
+        ));
+
+        let d = diagnostics(&recs);
+        assert_eq!(d.units, 5, "5 core units; probe excluded");
+        assert!((d.apply_rate - 4.0 / 5.0).abs() < 1e-9, "{}", d.apply_rate); // 4 of 5 applied
+        assert!(
+            (d.compile_rate - 2.0 / 4.0).abs() < 1e-9,
+            "{}",
+            d.compile_rate
+        ); // 2 of 4 compiled
+        assert_eq!(d.failure_classes[0], ("borrowck".to_string(), 2)); // most frequent
+        assert_eq!(d.error_codes[0], ("E0499".to_string(), 2));
+        assert!(d.error_codes.contains(&("E0502".to_string(), 1)));
     }
 
     #[test]

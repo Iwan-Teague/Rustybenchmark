@@ -8,6 +8,32 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · `rustybench report` — the journal → deliverable command (P5)
+
+Built the `report` command docs/08 lists (`report [--format md|json]`), the shape of P5's output: fold a
+journal into a formatted deliverable rather than the terse `stats` line.
+
+- **`bench_stats::diagnostics(records)`** (new, pure, core-only per ADR-0009): apply-rate, compile-rate
+  (compiled ÷ *applied*), and the **failure-class** and **rustc-error-code histograms** — the signal
+  docs/03 calls out as this benchmark's differentiator ("*which part of Rust* a model is weak at"), which
+  no general-purpose benchmark produces. `FailureClass::as_str()` added to `bench-core` for the kebab
+  histogram keys, and `StatReport`/`CategoryReport`/`ThroughputReport`/`DiagnosticsReport` gained
+  `Serialize` for the JSON format.
+- **CLI**: `report` renders **md** (headline capability + CI + throughput + pass-rate; per-category table
+  with CIs, ICC and the directional-only flag; the diagnostics block; and the honest bootstrap/borrowck-
+  lower-bound caveats) or **json** (`{stats, diagnostics}` with the histograms as arrays, radar-ready).
+  `html` is accepted-but-declined with a clear message (deferred).
+
+Verified on the real smoke journal (`runs/clean.jsonl`, Qwen2.5-3B): capability 0.336, throughput 53.5
+tok/s / 945 units-h / 157 passes-h, and — the new part — **apply 1.000, compile 0.375**, failure classes
+`none×5, logic×1, other×1, trait×1`, top codes `E0277×1, E0507×1`. That compile-rate and histogram are
+exactly the per-model diagnostic the project exists to publish.
+
+Pure code + fast unit tests (a `diagnostics` aggregate test on synthetic records; `FailureClass::as_str`),
+no grading run. 172 workspace tests (+2); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Richer `failure_class` — the diagnostic classifier reaches its dormant classes
 
 docs/03 §L1 specifies `failure_class = classify(error_code, message_pattern, clippy_lints, category)`, but

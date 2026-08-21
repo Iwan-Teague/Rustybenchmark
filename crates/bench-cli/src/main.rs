@@ -63,6 +63,15 @@ enum Command {
         #[arg(long, default_value = "runs/journal.jsonl")]
         journal: PathBuf,
     },
+    /// Render a journal into a formatted report: headline numbers, per-category
+    /// table with CIs, and the failure-class/error-code histograms (docs/08, P5).
+    Report {
+        #[arg(long, default_value = "runs/journal.jsonl")]
+        journal: PathBuf,
+        /// Output format: `md` (default) or `json`.
+        #[arg(long, default_value = "md")]
+        format: String,
+    },
     /// Compare two models (McNemar on the shared pass bits + paired pass-rate CI).
     Compare {
         #[arg(long)]
@@ -164,6 +173,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             scratch,
         } => validate_family(&family, seeds, &scratch),
         Command::Stats { journal } => stats(&journal),
+        Command::Report { journal, format } => report(&journal, &format),
         Command::Compare {
             journal_a,
             journal_b,
@@ -967,6 +977,142 @@ fn stats(journal: &Path) -> Result<(), Box<dyn std::error::Error>> {
         r.bootstrap_iters
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// report — journal → formatted deliverable (docs/08, P5)
+// ---------------------------------------------------------------------------
+
+fn report(journal: &Path, format: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let records = bench_stats::load_journal(journal)
+        .map_err(|e| format!("reading {}: {e}", journal.display()))?;
+    if records.is_empty() {
+        return Err(format!("no graded units in {}", journal.display()).into());
+    }
+    let r = bench_stats::report(&records);
+    let d = bench_stats::diagnostics(&records);
+    match format {
+        "md" => print!("{}", render_report_md(&r, &d)),
+        "json" => print!("{}", render_report_json(&r, &d)?),
+        other => {
+            return Err(format!(
+                "unsupported format `{other}` — use `md` or `json` (`html` not yet implemented)"
+            )
+            .into())
+        }
+    }
+    Ok(())
+}
+
+fn render_report_md(r: &bench_stats::StatReport, d: &bench_stats::DiagnosticsReport) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "# Rustybenchmark report\n");
+    let _ = writeln!(s, "## Headline\n");
+    let _ = writeln!(
+        s,
+        "- **capability_score** {:.3}  [{:.3}, {:.3}]  (95% overall CI, cluster bootstrap)",
+        r.capability_score, r.capability_ci.0, r.capability_ci.1
+    );
+    match &r.throughput {
+        Some(t) => {
+            let _ = writeln!(
+                s,
+                "- **throughput** {:.1} tok/s decode · {:.0} units/hour · {:.0} passes/hour",
+                t.decode_tok_per_s, t.units_per_hour, t.passes_per_hour
+            );
+        }
+        None => {
+            let _ = writeln!(s, "- **throughput** n/a (journal carries no timing)");
+        }
+    }
+    let _ = writeln!(
+        s,
+        "- **pass_rate** {:.3}  over {} scored core units in {} categor{}",
+        r.pass_rate,
+        r.units,
+        r.categories.len(),
+        if r.categories.len() == 1 { "y" } else { "ies" }
+    );
+
+    let _ = writeln!(s, "\n## Per category\n");
+    let _ = writeln!(
+        s,
+        "Simultaneous CIs at 1 − 0.05/{}. Categories with fewer than {} families are directional-only (not rankable).\n",
+        r.simultaneous_k,
+        bench_stats::CLUSTER_FLOOR
+    );
+    let _ = writeln!(
+        s,
+        "| category | score | 95% CI | pass | families | units | icc | |"
+    );
+    let _ = writeln!(s, "|---|---|---|---|---|---|---|---|");
+    let mut cats = r.categories.clone();
+    cats.sort_by(|a, b| a.category.cmp(&b.category));
+    for c in &cats {
+        let icc = c
+            .icc
+            .map(|i| format!("{i:.2}"))
+            .unwrap_or_else(|| "—".into());
+        let flag = if c.directional_only {
+            "directional-only"
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            s,
+            "| {} | {:.3} | [{:.3}, {:.3}] | {:.3} | {} | {} | {} | {} |",
+            c.category,
+            c.mean_score,
+            c.score_ci.0,
+            c.score_ci.1,
+            c.pass_rate,
+            c.families,
+            c.units,
+            icc,
+            flag
+        );
+    }
+
+    let _ = writeln!(s, "\n## Diagnostics (core units)\n");
+    let _ = writeln!(
+        s,
+        "- **apply_rate** {:.3} · **compile_rate** {:.3}  (over {} units)",
+        d.apply_rate, d.compile_rate, d.units
+    );
+    let join = |v: &[(String, usize)], n: usize| {
+        let parts: Vec<String> = v.iter().take(n).map(|(k, c)| format!("{k}×{c}")).collect();
+        if parts.is_empty() {
+            "—".to_string()
+        } else {
+            parts.join(", ")
+        }
+    };
+    let _ = writeln!(
+        s,
+        "- **failure classes**: {}",
+        join(&d.failure_classes, d.failure_classes.len())
+    );
+    let _ = writeln!(s, "- **top error codes**: {}", join(&d.error_codes, 10));
+
+    let _ = writeln!(s, "\n---");
+    let _ = writeln!(
+        s,
+        "_Family-level cluster bootstrap, {} resamples — a lower bound on CI width until shapes are labelled (Q24). Only core units are scored (ADR-0009); borrow-failure counts are a lower bound, since type checking aborts before borrowck (docs/03)._",
+        r.bootstrap_iters
+    );
+    s
+}
+
+fn render_report_json(
+    r: &bench_stats::StatReport,
+    d: &bench_stats::DiagnosticsReport,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let v = serde_json::json!({
+        "stats": serde_json::to_value(r)?,
+        "diagnostics": serde_json::to_value(d)?,
+    });
+    Ok(format!("{}\n", serde_json::to_string_pretty(&v)?))
 }
 
 fn compare(a: &Path, b: &Path) -> Result<(), Box<dyn std::error::Error>> {

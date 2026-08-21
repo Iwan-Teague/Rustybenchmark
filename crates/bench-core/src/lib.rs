@@ -230,6 +230,27 @@ pub enum FailureClass {
     None,
 }
 
+impl FailureClass {
+    /// The kebab-case name (matches the serde representation), for histograms and
+    /// human-readable reports.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FailureClass::Borrowck => "borrowck",
+            FailureClass::Trait => "trait",
+            FailureClass::Type => "type",
+            FailureClass::Lifetime => "lifetime",
+            FailureClass::AsyncSend => "async-send",
+            FailureClass::Syntax => "syntax",
+            FailureClass::Resolve => "resolve",
+            FailureClass::Idiom => "idiom",
+            FailureClass::Logic => "logic",
+            FailureClass::Constraint => "constraint",
+            FailureClass::Other => "other",
+            FailureClass::None => "none",
+        }
+    }
+}
+
 /// The full graded result for one attempt. Layers run in order; a failed gate
 /// short-circuits later layers but every field is recorded.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -652,6 +673,13 @@ mod tests {
             FailureClass::Borrowck
         );
         assert_eq!(classify_compile_error(&[], &[]), FailureClass::None);
+    }
+
+    #[test]
+    fn failure_class_as_str_is_kebab() {
+        assert_eq!(FailureClass::Borrowck.as_str(), "borrowck");
+        assert_eq!(FailureClass::AsyncSend.as_str(), "async-send");
+        assert_eq!(FailureClass::None.as_str(), "none");
     }
 
     #[test]
