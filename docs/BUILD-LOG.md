@@ -8,6 +8,60 @@ The roadmap phases referenced here are in [14-roadmap.md](14-roadmap.md).
 
 ---
 
+## 2026-08-21 · Fourteenth family: `raw-ptr-mut` — unsafe *writes*, the second unsafe-core family (P7)
+
+The corpus had exactly one unsafe-core family (`raw-ptr`, reads through
+`*const i64`). This adds the write half of the unsafe story: **in-place mutation
+through a raw mutable pointer** —
+
+```rust
+pub fn {name}(ptr: *mut i64, len: usize) -> usize  // returns the number of elements written
+```
+
+The model must derive addresses with `ptr.add(i)`, dereference-**assign** under
+`unsafe`, and return how many slots it touched — a genuinely different skill from
+read-only traversal (aliasing discipline: never read a slot you are about to
+overwrite, and the count is part of the contract, not an afterthought).
+
+Two structural axes × four transforms = **16 distinct specs**: which positions are
+written (`all` / even indices / odd indices / first half — via start/stride/bound,
+same shape as `raw-ptr`) and what is stored (`x*2` / `-x` / `x*x` / `x+1`). The
+native `eval` mutates a `&mut [i64]` slice and is the source of truth; the reference
+mirrors it through `unsafe`; the differential oracle fuzzes 3000 inputs and compares
+**both** the returned count *and* the whole mutated buffer against the safe mirror.
+
+Baselines are two constant-ish cheats: `no_op` (write nothing, return 0) and
+`fill_zero` (zero everything, return `len`) — both caught on every seed because the
+pinned canonical case `[3,1,4,2]` selects ≥2 positions and every expected output
+element is non-zero (pinned across all 16 spec combinations).
+
+Honest caveats:
+
+- **Miri stays deferred**, as for `raw-ptr`: docs/04 weights the category
+  behaviour .70 / constraint .30 / quality .00 and renormalises quality away until
+  miri lands; correctness of pointer arithmetic here is checked by the differential
+  mirror plus the grader's existing checks, not by an interpreter.
+- Reference-distance is expected to sit near `raw-ptr`'s low band (pinned-pointer
+  interface ≈ fixed scaffold), so view/reference capacity is reported but not gated.
+- Like all unsafe-core families there is no clippy constraint layer
+  (`check_clippy=false`, `max_unsafe=None`).
+
+```
+validate-family raw-ptr-mut: 8 seed(s)
+  seed   0..7: OK   determinism=true reference=1.000 skeleton=0.000
+                     (behavior 0.000) baselines_caught=true canary=true   [×8]
+  anti-twin  view (prompt+skeleton): min=0.313 median=0.435 near-twin pairs (<0.25)=0/28
+  anti-twin  reference (solution) : min=0.000 median=0.368 near-twin pairs (<0.25)=6/28
+  capacity   view=8+ (asked 8, rejected 0)  reference=10
+  spec-diversity: 16 distinct skills (the authoritative task-diversity measure — Q31)
+  distinct-skills epoch: served 8 seed(s) covering 8 distinct skills
+all gates passed
+```
+
+178 workspace tests (+6); clippy `-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · `rustybench report` — the journal → deliverable command (P5)
 
 Built the `report` command docs/08 lists (`report [--format md|json]`), the shape of P5's output: fold a

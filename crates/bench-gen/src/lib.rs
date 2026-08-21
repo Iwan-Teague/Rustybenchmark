@@ -27,6 +27,7 @@ pub mod error_handling;
 pub mod generic_select;
 pub mod grid_reduce;
 pub mod idiom_refactor;
+pub mod raw_ptr_mut;
 pub mod seq_transform;
 pub mod stack_machine;
 pub mod string_processing;
@@ -198,6 +199,7 @@ pub const FAMILY_IDS: &[&str] = &[
     "trait-impl",
     "bit-ops",
     "raw-ptr",
+    "raw-ptr-mut",
     "str-transform",
     "dual-region",
     "generic-select",
@@ -216,6 +218,7 @@ pub fn family(id: &str) -> Option<Box<dyn Generator>> {
         "trait-impl" => Some(Box::new(traits_generics::TraitsGenericsFamily)),
         "bit-ops" => Some(Box::new(bit_manipulation::BitManipulationFamily)),
         "raw-ptr" => Some(Box::new(unsafe_core::UnsafeCoreFamily)),
+        "raw-ptr-mut" => Some(Box::new(raw_ptr_mut::RawPtrMutFamily)),
         "str-transform" => Some(Box::new(string_processing::StringProcessingFamily)),
         "dual-region" => Some(Box::new(dual_region::DualRegionFamily)),
         "generic-select" => Some(Box::new(generic_select::GenericSelectFamily)),
@@ -355,6 +358,11 @@ mod tests {
         assert_eq!(
             spec_diversity(family("raw-ptr").unwrap().as_ref(), 4000),
             20
+        );
+        // raw-ptr-mut = 4 write targets x 4 transforms (the writes sibling).
+        assert_eq!(
+            spec_diversity(family("raw-ptr-mut").unwrap().as_ref(), 4000),
+            16
         );
         // str-transform = 4 filters x 3 case-maps x 2 orders.
         assert_eq!(
