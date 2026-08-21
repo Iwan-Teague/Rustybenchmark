@@ -70,6 +70,29 @@ Honest caveats:
 
 ---
 
+## 2026-08-21 · `diagnostic_completeness` — borrow failures published as the lower bound they are
+
+The last docs/03 §L1 field (commit `21d0761`; this entry backfilled after the concurrent family commits
+cleared the shared BUILD-LOG). Type checking aborts before borrow checking, so a solution with a
+type/trait/resolve/syntax error never reaches borrowck and any borrow bug it *also* has is masked (docs/03
+measured it: one type error + two borrow errors → rustc emitted two E0308s and nothing else). The error
+histogram therefore undercounts borrow failures — in exactly this project's niche — so the honest fix is to
+*record* when borrowck wasn't reached.
+
+- **`bench-core`**: `DiagnosticCompleteness { Full, TypeckOnly }` (serde `snake_case` → `full`/`typeck_only`)
+  + `diagnostic_completeness(codes)` reusing `classify_error_codes`' phase order (a borrow/lifetime error ⇒
+  borrowck ran, `Full`; an earlier-phase error with none ⇒ `TypeckOnly`). Added as an `OracleVector` field
+  (`#[serde(default)]` = `Full`, so older journals parse unchanged).
+- **`bench-oracle`** `grade()`: classified from the codes on a compile failure, `Full` on a success.
+- **`bench-stats`/`report`**: `DiagnosticsReport.typeck_only` counts masked-borrowck core failures; the md
+  report prints *"borrowck masked: N failure(s) …"* when N > 0.
+
+Verified end-to-end on a synthetic journal (a `type`/E0308 failure + a clean unit): `typeck_only = 1`, the
+masked line renders, the serde value round-trips. Pure logic + fast unit tests, no grading run. clippy
+`-D warnings` and `cargo fmt --check` clean.
+
+---
+
 ## 2026-08-21 · Fourteenth family: `raw-ptr-mut` — unsafe *writes*, the second unsafe-core family (P7)
 
 The corpus had exactly one unsafe-core family (`raw-ptr`, reads through
